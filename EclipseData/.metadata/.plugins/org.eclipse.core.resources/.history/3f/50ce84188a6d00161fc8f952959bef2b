@@ -1,0 +1,6446 @@
+/*
+**************************************************************************************************************
+*											         ePDK
+*						            the Easy Portable/Player Develop Kits
+*									           desktop system
+*
+*						        	 (c) Copyright 2007-2010, ANDY, China
+*											 All Rights Reserved
+*
+* File    		: app_root_win_scene.c
+* By      		: Bayden
+* Func		: app_root applets plugin interface define
+* Version	: v1.0
+* ============================================================================================================
+* 2010-9-28 17:11:20  andy.zhang  create this file, implements the fundemental interface;
+**************************************************************************************************************
+*/
+
+#include "app_root_scene.h"
+
+#if SP_AutoUpdateFirmware
+#define PATH__LZ_C100_IMG					"x:\\update\\LZ_C100.img"			// 锟斤拷锟斤拷锟斤拷前锟斤拷锟斤拷
+#define PATH__AUTOEXE_LZ_C100_IMG			"x:\\update\\cmd(autoexe)_LZ_C100.img"	// 锟斤拷锟斤拷使锟矫此固硷拷
+const char *gc_pstrRelativePath_UpdateFirmware[] = {PATH__AUTOEXE_LZ_C100_IMG, PATH__LZ_C100_IMG};
+#define SIZE_gc_pstrRelativePath_UpdateFirmware		(sizeof(gc_pstrRelativePath_UpdateFirmware)/sizeof(gc_pstrRelativePath_UpdateFirmware[0]))
+#endif
+__krnl_event_t* wifi_control_sem = NULL;
+
+H_LYR integate_app_layer	= NULL;
+H_LYR show_tips_layer 		= NULL;
+H_LYR wechat_send_layer = NULL;
+H_WIN hFrm_InputMethod = NULL;
+
+exp_play_mode_t *exp_play_mode 	= NULL;
+bbc_wx_param* g_wx_param = NULL;
+
+char STRING_WECHAT_PHOTO[32]    = "f:\\wechat\\photo\\";				////微锟斤拷锟斤拷锟截憋拷锟斤拷图片路锟斤拷
+char STRING_WECHAT_VOICE[32]    = "f:\\wechat\\voice\\";				////微锟斤拷锟斤拷锟截憋拷锟斤拷锟斤拷频路锟斤拷
+char STRING_WECHAT_VIDEO[32]    = "f:\\wechat\\video\\";				////微锟斤拷锟斤拷锟截憋拷锟斤拷锟斤拷频路锟斤拷
+char STRING_WECHAT_SEND[32]     = "f:\\wechat\\RECORD\\";				/// 微锟斤拷 锟斤拷锟斤拷路锟斤拷
+char STRING_QRCODE_PATH[20]     = "f:\\wechat\\";			        	////微锟斤拷 锟斤拷维锟斤拷路锟斤拷
+char STRING_USER_HEAD_PATH[20]  = "f:\\wechat\\";				    	/// 微锟斤拷 锟矫伙拷头锟斤拷路锟斤拷
+char g_strConnectedWifiName[64] = {0};
+char g_strConnectedWifiPsk[25] = {0};
+char g_strAbsolutePath_UpdateFirmware[64] = {0};
+char wxp_file_path[128] = {0};
+char wxp_head_path[128] = {0};
+
+__s32 net_movie_control_amplifier_flag = 0;//0锟截憋拷 1锟斤拷
+__s32 wechat_get_msg_flag = 0;
+__u8  recving_lock = 0;			
+__u8  photo_set_willow_state = 0;
+static __u8 app_root_weather_thread_id = 0;
+static cacti_wearther_5days* root_weather_5days = NULL;
+__s32 wechat_data = 0;
+
+H_LYR app_root_layer_create(RECT rect , __s32 pipe)
+{
+
+	H_LYR layer = NULL;
+	FB  fb =
+	{
+	    {0, 0},                                   		/* size      */
+	    {0, 0, 0},                                      /* buffer    */
+	   {FB_TYPE_RGB, {PIXEL_COLOR_ARGB8888, 0, (__rgb_seq_t)0}},    
+
+	};
+
+	__disp_layer_para_t lstlyr =
+	{
+	    DISP_LAYER_WORK_MODE_NORMAL,                    /* mode      */
+	    0,                                              /* ck_mode   */
+	    0,                                              /* alpha_en  */
+	    0,                                              /* alpha_val */
+	    1,                                              /* pipe      */
+	    0xff,                                           /* prio      */
+	    {0, 0, 0, 0},                           		/* screen    */
+	    {0, 0, 0, 0},                               	/* source    */
+	    DISP_LAYER_OUTPUT_CHN_DE_CH1,                   /* channel   */
+	    NULL                                            /* fb        */
+	};
+
+	__layerwincreate_para_t lyrcreate_info =
+	{
+	    "root layer",
+	    NULL,
+	    GUI_LYRWIN_STA_SLEEP,
+	    GUI_LYRWIN_NORMAL
+	};
+	fb.size.width		= rect.width;
+	fb.size.height		= rect.height;	
+	
+	lstlyr.src_win.x  		= 0;
+	lstlyr.src_win.y  		= 0;
+	lstlyr.src_win.width 		= rect.width;
+	lstlyr.src_win.height 	= rect.height;
+	
+	lstlyr.scn_win.x		= rect.x;
+	lstlyr.scn_win.y		= rect.y;
+	lstlyr.scn_win.width  	= rect.width;
+	lstlyr.scn_win.height 	= rect.height;
+	
+	lstlyr.pipe = pipe;
+	lstlyr.fb = &fb;
+	lyrcreate_info.lyrpara = &lstlyr;
+	
+	layer = GUI_LyrWinCreate(&lyrcreate_info);
+	if( !layer )
+	{
+		__wrn("app bar layer create error !\n");
+	} 
+		
+	return layer;	
+}
+
+static __s32 app_root_create_story_dir(__s32 root_type)
+{
+	char str_buff[128], str_disk[8], path_buff[128];
+	__s32 i, cnt;
+	ES_DIR *dir = NULL;	
+	get_menu_text(story_dir_path[0], str_buff, sizeof(str_buff));
+	app_root_rat_get_search_path(root_type, str_disk);
+	eLIBs_strcpy(path_buff, str_disk);
+	eLIBs_strcat(path_buff, "\\");
+	eLIBs_strcat(path_buff, str_buff);
+	dir = eLIBs_opendir(path_buff);
+	if(dir == NULL)
+	{
+		cnt = sizeof(story_dir_path)/4;
+		for(i=0; i<cnt; i++)
+		{
+			get_menu_text(story_dir_path[i], str_buff, sizeof(str_buff));
+			eLIBs_strcpy(path_buff, str_disk);
+			eLIBs_strcat(path_buff, "\\");
+			eLIBs_strcat(path_buff, str_buff);	
+    		if(eLIBs_mkdir(path_buff))
+    		{      
+                __wrn("create db dir fail, path_buff=%s...\n", path_buff);
+    		}
+            else
+            {
+                __wrn("create db dir success, path_buff=%s...\n", path_buff);
+            }			
+		}
+		
+	}
+	else
+	{
+		__wrn("--  Dir Exist !-- \n");	
+		eLIBs_closedir(dir);
+		dir = 0;
+	}	
+	return EPDK_OK;
+}
+
+static __s32 app_root_create_read_dir(__s32 root_type)
+{
+	char str_buff[128], str_disk[8], path_buff[128];
+	__s32 i, cnt;
+	ES_DIR *dir = NULL;	
+
+	app_root_rat_get_search_path(root_type, str_disk);
+
+	cnt = sizeof(point_read_dir_path)/4;
+	for(i=0; i<cnt; i++)
+	{	
+		get_menu_text(point_read_dir_path[i], str_buff, sizeof(str_buff));
+			eLIBs_strcpy(path_buff, str_disk);
+			eLIBs_strcat(path_buff, "\\");
+			eLIBs_strcat(path_buff, str_buff);	
+		dir = eLIBs_opendir(path_buff);
+		if(dir == NULL)
+		{
+	    		if(eLIBs_mkdir(path_buff))
+	    		{      
+	                	__wrn("create point dir fail, path_buff=%s...\n", path_buff);
+	    		}
+			else
+			{
+			    __wrn("create point dir success, path_buff=%s...\n", path_buff);
+			}			
+
+		}
+		else
+		{
+			__wrn("--  Dir Exist !-- \n");	
+			eLIBs_closedir(dir);
+			dir = 0;
+		}	
+	}
+	return EPDK_OK;
+}
+
+static __s32 CheckFileSize(const char *fullPath, __s32 fileSize)
+{
+	__s64	fileSize_byte;
+	fileSize_byte = eLIBs_GetFileSize(fullPath);
+	if((fileSize_byte < (fileSize + 1024 * 1024)) && (fileSize_byte > (fileSize - 1024 * 1024)))
+	{
+		__wrn("Check firmware <<%s>>succ!\n", fullPath);
+		return EPDK_OK;
+	}
+	return EPDK_FAIL;
+}
+
+static __s32 CheckFileSize_Firmware(char rootDir, __s32 fileSize)
+{
+	if(!rootDir)
+	{
+		return EPDK_OK;
+	}
+	if(fileSize > 1024)
+	{
+		__s64	fileSize_byte;
+		__u8	i;
+		for(i = 0; i < SIZE_gc_pstrRelativePath_UpdateFirmware; i++)
+		{
+			memset(g_strAbsolutePath_UpdateFirmware, 0, sizeof(g_strAbsolutePath_UpdateFirmware));
+			eLIBs_strcpy(g_strAbsolutePath_UpdateFirmware, gc_pstrRelativePath_UpdateFirmware[i]);
+			g_strAbsolutePath_UpdateFirmware[0] = rootDir;
+			if(CheckFileSize(g_strAbsolutePath_UpdateFirmware, fileSize) == EPDK_OK)
+			{
+				return rootDir; 
+			}
+		}
+	}
+	return 0;
+}
+static __s32 DetectUpdateFirmware(char *rootDir)
+{
+	__s32 ret, firmwareSize;
+	if(!rootDir)
+	{
+		return EPDK_OK;
+	}
+	ret = esCFG_GetKeyValue("partition0", "size_hi", &firmwareSize, 1);
+	if(ret || firmwareSize)
+	{
+		__wrn("fetch para: partition0 size_hi from script failed\n");
+		return EPDK_OK;
+	}
+	ret = esCFG_GetKeyValue("partition0", "size_lo", &firmwareSize, 1);
+	if(ret || firmwareSize <= 0)
+	{
+		__wrn("fetch para: partition0 size_lo from script failed\n");
+		return EPDK_OK;
+	}
+	switch(firmwareSize)
+	{
+		case 3823 :
+			firmwareSize = 4643840;
+			break;
+
+		case 7919 :
+			firmwareSize = 8838144;
+			break;
+
+		default :
+			return 0;
+	}
+
+	if(*rootDir)
+	{
+		return CheckFileSize_Firmware(*rootDir, firmwareSize);
+	}
+	else
+	{
+		// 锟斤拷锟揭达拷锟斤拷
+		const char *c_pstrRatPartitionName[] = {RAT_SD_CARD, RAT_USB_DISK};
+		__u8	i;
+		for(i = 0; i < 2; i++)
+		{
+			char disk_name[RAT_MAX_PARTITION][4];
+			eLIBs_memset(disk_name , 0 , sizeof(disk_name)) ;
+			ret = rat_get_partition_name(c_pstrRatPartitionName[i], disk_name);
+
+			if((EPDK_OK == ret) && disk_name[0][0])
+			{
+				*rootDir = disk_name[0][0];
+				ret = CheckFileSize_Firmware(*rootDir, firmwareSize);
+
+				if(ret)
+				{
+					return ret;
+				}
+			}
+		}
+	}
+	return 0;
+}
+__s32 GetFileTotal(const char *searchPath, rat_media_type_t mediaType)
+{
+	HRAT 	hrat = NULL;
+	__u32 	total = 0;
+	__wrn("searchPath[%s]\n", searchPath);
+	hrat = rat_open(searchPath, mediaType, 0);
+
+	if(hrat == NULL)
+	{
+		return 0;
+	}
+
+	total = rat_get_cur_scan_cnt(hrat);
+	__wrn("scan files total=%ld\n", total);
+	return total;
+}
+__s32 GetFileTotal_Firmware(char *rootDir)
+{
+	char		path[] = PATH__LZ_C100_IMG_FOLDER;
+	
+	if(*rootDir)
+	{
+		path[0] = *rootDir;
+		return GetFileTotal(path, RAT_MEDIA_TYPE_FIRMWARE);
+	}
+	else
+	{
+		const char *c_pstrRatPartitionName[] = {RAT_SD_CARD, RAT_USB_DISK};
+		__u8	i;
+
+		for(i = 0; i < sizeof(c_pstrRatPartitionName) / sizeof(c_pstrRatPartitionName[0]); i++)
+		{
+			__s32	ret;
+			char	disk_name[RAT_MAX_PARTITION][4];
+			eLIBs_memset(disk_name , 0 , sizeof(disk_name)) ;
+			ret = rat_get_partition_name(c_pstrRatPartitionName[i], disk_name);
+			if((EPDK_OK == ret) && disk_name[0][0])
+			{
+				*rootDir = disk_name[0][0];
+				path[0] = *rootDir;
+				ret = GetFileTotal(path, RAT_MEDIA_TYPE_FIRMWARE);
+
+				if(ret)
+				{
+					return ret;
+				}
+			}
+		}
+	}
+
+	return 0;
+}
+char app_root_detect_update_firmware(root_ctrl_t *root_ctrl)
+{
+	char rootDir = 0;
+	if(root_ctrl->m_updateFirmwareLog == LOG_UpdateFirmware_By_FSPlugin)
+	{
+		rootDir = root_ctrl->root_para->fw_update_file_disk;
+	}
+	// 锟斤拷锟斤拷1
+	if(DetectUpdateFirmware(&rootDir))
+	{
+		// 锟斤拷锟斤拷锟斤拷锟斤拷前锟斤拷锟斤拷锟侥匡拷锟斤拷锟斤拷锟教硷拷
+		root_ctrl->root_para->fw_update_file_disk = rootDir;
+		app_root_delete_all_app(root_ctrl);
+		app_root_cmd2self(root_ctrl, FW_UPDATE_DIALOG_ID, ADLG_CMD_SET_UI, 0, 0);
+		return rootDir;
+	}
+	root_ctrl->m_updateFirmwareLog = 0;  
+	// 锟斤拷锟斤拷2
+	if(GetFileTotal_Firmware(&rootDir))
+	{
+		root_para_t *root_para = root_ctrl->root_para;
+		app_root_delete_all_app(root_ctrl);
+		root_para->root_type 	  = app_root_get_rat_root_type(__app_root_get_reg_storage_type(rootDir));
+		root_para->explr_root     = root_para->root_type;
+		root_para->data 		  = ID_EXPLORER_FIRMWARE;
+		root_ctrl->h_app_explorer =  app_explorer_create(root_para);
+		GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+		return rootDir;
+	}
+	return EPDK_OK;
+}
+void app_root_update_firmware_giveup(root_ctrl_t *root_ctrl)
+{
+	__s32 ret = EPDK_FAIL;
+	__s32 reg_storage_type;
+	__s32 reg_media_type;
+
+
+	switch(root_ctrl->m_updateFirmwareLog)
+	{
+		case LOG_UpdateFirmware_By_RootCreate :
+			reg_media_type = -1;
+			reg_storage_type = -1;
+			ret = app_root_shortcut_process(root_ctrl, app_root_prob_intent_first_play, reg_media_type, reg_storage_type, EPDK_FALSE, EPDK_TRUE);
+			break;
+
+		case LOG_UpdateFirmware_By_FSPlugin :
+			reg_storage_type = __app_root_get_reg_storage_type(g_strAbsolutePath_UpdateFirmware[0]);
+			reg_media_type = -1;
+
+			if(-1 != reg_storage_type)
+			{
+			      ret = app_root_shortcut_process(root_ctrl, app_root_prob_intent_plugin_for_play, reg_media_type, reg_storage_type, EPDK_FALSE, EPDK_FALSE);
+			}
+			else
+			{
+				reg_root_para_t *para;
+				para = (reg_root_para_t *)dsk_reg_get_para_by_app(REG_APP_ROOT);
+				if(para)
+				{
+					reg_media_type = para->last_play_app;
+					__wrn("reg_root_para->last_play_app = %d\n", para->last_play_app);
+					ret = app_root_shortcut_process(root_ctrl, app_root_prob_intent_switch_media, reg_media_type, reg_storage_type, EPDK_FALSE, EPDK_TRUE);
+				}
+			}
+			break;
+		default :
+			break;
+	}
+	root_ctrl->m_updateFirmwareLog = 0;
+
+	if(EPDK_FAIL == ret)
+	{
+		app_home_restore_ex(root_ctrl);
+	}
+}
+
+
+
+__s32 __app_root_broadcast_msg(__gui_msg_t *msg)
+{
+	H_WIN root, child;
+	char  winname[256];
+	__gui_msg_t set_msg;
+	eLIBs_memcpy(&set_msg, msg, sizeof(__gui_msg_t));
+	root  = msg->h_deswin;
+	child = GUI_WinGetFirstChild(root);
+	while(child != NULL)
+	{
+		eLIBs_memset(winname, 0, 256);
+		GUI_WinGetName(child, winname);
+		set_msg.h_deswin = child;
+		GUI_SendMessage(&set_msg);
+		child = GUI_WinGetNextBro(child);
+	}
+	return EPDK_OK;		
+}
+
+static __s32 app_root_show_dlg_no_file(H_WIN hwin, __s32 time)
+{
+	H_WIN dlg;
+	__s32 lang_id[]={STRING_SET_CUE,STRING_EXPLR_NO_FILE};
+	default_dialog(dlg, hwin, APP_COM_DLG_ID, ADLG_OK, lang_id);
+    if(0 != time)
+    {
+	    esKRNL_TimeDly(time);
+    }
+    else
+    {
+        esKRNL_TimeDly(50);
+    }   
+	app_dialog_destroy(dlg);
+}
+
+static __s32  app_root_rat_get_search_path(__s32 root_type, char* path)
+{
+	__s32 ret = 0;
+	char s_root_type[32];
+	char disk_name[RAT_MAX_PARTITION][4];	
+	eLIBs_memset(s_root_type, 0, sizeof(s_root_type));
+	eLIBs_memset(disk_name, 0, sizeof(disk_name));	
+	switch(root_type)
+	{
+		case RAT_LOCAL:
+			eLIBs_strcpy(s_root_type,RAT_LOCAL_DISK);				
+			break;
+		case RAT_TF:
+			eLIBs_strcpy(s_root_type,RAT_SD_CARD);				
+			break;
+		case RAT_USB:
+			eLIBs_strcpy(s_root_type,RAT_USB_DISK);				
+			break;
+		default:
+			return EPDK_FAIL;
+	}
+
+	ret = rat_get_partition_name(s_root_type, disk_name);
+	eLIBs_strcpy(path,disk_name[0]);		    
+	return ret;
+}
+static __s32 app_root_check_mediafile_exist(__s32 root_type, rat_media_type_t type)
+{
+	__s32 ret, total;
+	HRAT  h_rat = 0;
+	char path[RAT_MAX_FULL_PATH_LEN];
+	eLIBs_memset(path, 0, sizeof(path));
+	
+	ret = app_root_rat_get_search_path(root_type, path);
+	if(ret == EPDK_FAIL)
+	{
+		return EPDK_FAIL;
+	}
+	if(eLIBs_strlen(path) == 0)
+	{
+		return EPDK_FAIL;
+	}		
+	h_rat  = rat_open(path, type, 0);		
+	if(h_rat == NULL)
+	{
+		return EPDK_FAIL;
+	}	
+	total = rat_get_cur_scan_cnt(h_rat);	
+	if(total)
+	{
+		return EPDK_OK;	
+	}
+	return EPDK_FAIL;
+}
+
+static __s32 app_root_volume_create(root_ctrl_t *root_ctrl,__s32 value)
+{
+	H_LYR lyrwin  = NULL;
+	RECT rect;
+	HTHEME bg_bmp=NULL;
+	void* bg_bmp_buf=NULL;
+	if(NULL == root_ctrl)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	rect.width = 80;
+	rect.height = 80;
+	rect.x = (_W_SCR_ -rect.width) /2;
+	rect.y = (_H_SCR_ -rect.height) /2;	
+	if(!root_ctrl->h_app_volume)
+	{
+		root_ctrl->h_app_volume = app_root_layer_create(rect,1);
+		if(NULL == root_ctrl->h_app_volume)
+		{
+			__wrn("--app root volume lyr is NULL--\n");
+		}
+	}
+	else
+	{
+		GUI_LyrWinGetScnWindow(lyrwin, &rect);
+	}
+   	if(!bg_bmp)
+	{
+		bg_bmp 	   = dsk_theme_open(ID_INIT_VOLUME00_BMP+value);
+		bg_bmp_buf = dsk_theme_hdl2buf(bg_bmp);
+	}
+	GUI_LyrWinSel(root_ctrl->h_app_volume);
+	GUI_BMP_Draw(bg_bmp_buf,0,0);
+	GUI_LyrWinSetSta(root_ctrl->h_app_volume,GUI_LYRWIN_STA_ON);
+	GUI_LyrWinSetTop(root_ctrl->h_app_volume);
+	dsk_theme_close(bg_bmp);
+	bg_bmp=NULL;
+	bg_bmp_buf=NULL;
+
+	if(GUI_IsTimerInstalled(root_ctrl->root_para->h_parent, APP_ROOT_VOLUME_TIME_ID))
+	{
+		GUI_ResetTimer(root_ctrl->root_para->h_parent,APP_ROOT_VOLUME_TIME_ID, APP_ROOT_VOLUME_TIMEOUT, NULL);
+	}
+	else
+	{
+		GUI_SetTimer(root_ctrl->root_para->h_parent,APP_ROOT_VOLUME_TIME_ID, APP_ROOT_VOLUME_TIMEOUT, NULL);
+	}
+	return root_ctrl->h_app_volume;
+}
+static __s32 app_root_volume_delete(root_ctrl_t *root_ctrl)
+{
+	if(NULL == root_ctrl)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}	
+	if(root_ctrl->h_app_volume)
+	{
+		GUI_LyrWinDelete(root_ctrl->h_app_volume);	
+		root_ctrl->h_app_volume = NULL;
+	}
+	return EPDK_OK;
+}
+
+static void  app_root_cmd2self(root_ctrl_t *para, __s32 lword, __s32 hword, __s32 data2, __s32 reserved)
+{
+	__gui_msg_t msg;
+	eLIBs_memset(&msg, 0, sizeof(__gui_msg_t));
+	msg.h_deswin = para->root_para->h_parent;
+	msg.h_srcwin = NULL;
+	msg.id = GUI_MSG_COMMAND;
+	msg.dwAddData1 = MAKELONG(lword, hword);
+	msg.dwAddData2 = data2;
+	msg.dwReserved = reserved;
+	GUI_SendMessage(&msg);
+}
+
+static void  app_root_cmd2self_notify(H_WIN hwinDest, __s32 lword, __s32 hword, __s32 data2, __s32 reserved)
+{
+	__gui_msg_t msg;
+	eLIBs_memset(&msg, 0, sizeof(__gui_msg_t));
+	msg.h_srcwin = NULL;
+	msg.h_deswin = hwinDest;
+	msg.id = GUI_MSG_COMMAND;
+	msg.dwAddData1 = MAKELONG(lword, hword);
+	msg.dwAddData2 = data2;
+	msg.dwReserved = reserved;
+	GUI_SendNotifyMessage(&msg);
+	__msg("app_root_cmd2self_notify:0x%X\n", msg.dwAddData1);
+}
+
+static __s32  app_do_async(H_WIN hwin, __u32 msg_id, p_app_root_fun pfun, void *arg)
+{
+	
+	__gui_msg_t setmsg;
+	if(NULL == hwin)
+	{
+		return EPDK_FAIL;
+	}
+	setmsg.id			=  msg_id;
+	setmsg.h_srcwin		=  NULL;
+	setmsg.h_deswin		=  hwin;
+	setmsg.dwAddData1	= (__u32)pfun;
+	setmsg.dwAddData2	= (__u32)arg;
+	setmsg.p_arg		=  NULL;
+	GUI_SendNotifyMessage(&setmsg);
+	return EPDK_OK;
+}
+
+static void   app_root_set_focuschild(H_WIN hwin, __s32 syn)
+{
+	if(0 == hwin)
+	{
+		return;
+	}
+
+	if(1 == syn)
+	{
+		GUI_WinSetFocusChild(hwin);
+	}
+	else
+	{
+		__gui_msg_t setmsg;
+		setmsg.id			=  GUI_MSG_SET_FOCUS;
+		setmsg.h_srcwin		=  NULL;
+		setmsg.h_deswin		=  hwin;
+		setmsg.dwAddData1	=  NULL;
+		setmsg.dwAddData2	=  NULL;
+		setmsg.p_arg		=  NULL;
+		GUI_SendNotifyMessage(&setmsg);
+	}
+}
+
+static __s32  app_root_bgmusic_exist(__gui_msg_t *msg, H_WIN *hMusic)
+{
+	H_WIN root, child;
+	char  winname[256];
+	__bool exist;
+	root  = GUI_WinGetHandFromName(APP_ROOT);
+	child = GUI_WinGetFirstChild(root);
+	exist = 0;
+	*hMusic = 0;
+
+	while(child != NULL)
+	{
+		eLIBs_memset(winname, 0, 256);
+		GUI_WinGetName(child, winname);
+		__msg("winname = %s \n", winname);
+
+		if(0 == eLIBs_strcmp(APP_MUSIC, winname))
+		{
+			*hMusic = child;
+			exist = 1;
+			break;
+		}
+
+		child = GUI_WinGetNextBro(child);
+	}
+
+	return exist;
+}
+
+static __s32  app_root_set_bgmusic_mode(__gui_msg_t *msg)
+{
+	__s32 ret = EPDK_FAIL;
+	root_ctrl_t   *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(root_ctrl->h_app_music)
+	{
+		ret = app_music_set_bg_mode(root_ctrl->h_app_music);
+	}
+	return ret;
+}
+static void   app_root_bgmusic_delete(__gui_msg_t *msg)
+{
+	H_WIN root, child, next_child;
+	char  winname[256];
+	root_para_t *root_para;
+	root_ctrl_t   *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	root_para = root_ctrl->root_para;
+	root  = GUI_WinGetHandFromName(APP_ROOT);
+	if(!root)
+	{
+		__err("GUI_WinGetHandFromName fail...\n");
+		return ;
+	}
+	child = GUI_WinGetFirstChild(root);
+	while(child != NULL)
+	{
+		eLIBs_memset(winname, 0, 256);
+		GUI_WinGetName(child, winname);
+		next_child = GUI_WinGetNextBro(child);
+		__msg("winname = %s \n", winname);
+
+		if(0 == eLIBs_strcmp(APP_MUSIC, winname))
+		{
+			GUI_ManWinDelete(child);
+			root_ctrl->h_app_music = NULL;
+			break;
+		}
+
+		child = next_child;
+	}
+}
+
+static void   app_root_bgmusic_create(__gui_msg_t *msg)
+{
+	H_WIN root, child;
+	char  winname[256];
+	__bool exist;
+	root_para_t *root_para;
+	root_ctrl_t   *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	root_para = root_ctrl->root_para;
+	root  = GUI_WinGetHandFromName(APP_ROOT);
+	child = GUI_WinGetFirstChild(root);
+	exist = 0;
+
+	while(child != NULL)
+	{
+		eLIBs_memset(winname, 0, 256);
+		GUI_WinGetName(child, winname);
+		__msg("winname = %s \n", winname);
+
+		if(0 == eLIBs_strcmp(APP_MUSIC, winname))
+		{
+			exist = 1;
+			break;
+		}
+
+		child = GUI_WinGetNextBro(child);
+	}
+
+	if(0 == exist)
+	{
+		root_para->data = MUSICPLAYER_BACKGROUND;
+		root_ctrl->h_app_music =  app_music_create(root_para);
+	}
+}
+static void   app_root_delete_all_app(root_ctrl_t *para)
+{
+	H_WIN root, child, next_child;
+	char  winname[256];
+	if(!para)
+	{
+		__err("invalid para...\n");
+	}
+	root  = GUI_WinGetHandFromName(APP_ROOT);
+	if(!root)
+	{
+		__err("GUI_WinGetHandFromName fail...\n");
+		return ;
+	}
+	child = GUI_WinGetFirstChild(root);
+	while(child != NULL)
+	{
+		eLIBs_memset(winname, 0, sizeof(winname));
+		GUI_WinGetName(child, winname);
+		next_child = GUI_WinGetNextBro(child);
+		GUI_ManWinDelete(child);
+		child = next_child;
+	}
+	if(wechat_send_layer)
+	{
+		GUI_LyrWinDelete(wechat_send_layer);
+		wechat_send_layer = NULL;
+	}
+	app_root_volume_delete(para);
+	para->h_app_home 		 = NULL;
+	para->h_app_explorer 	 = NULL;
+	para->h_app_movie     	 = NULL;
+	para->h_app_music    	 = NULL;
+	para->h_app_photo    	 = NULL;
+	para->h_app_setting  	 = NULL;
+	para->h_app_karaok 	 	 = NULL;
+	para->h_app_weather 	 = NULL;
+	para->h_wechat_send 	 = NULL;
+	para->h_app_net_explorer = NULL;
+	para->h_app_point_read 	 = NULL;
+	para->h_app_wifi 	 	 = NULL;
+	gscene_hbar_back_state(1);
+}
+static __s32  app_root_to_theater(root_ctrl_t *para)
+{
+	H_WIN root, child, next_child;
+	char  winname[256];
+	if(!para)
+	{
+		__err("invalid para...\n");
+	}
+	if(para->h_app_net_explorer)
+	{
+		return EPDK_OK;
+	}
+     app_root_delete_all_app(para); 
+    gscene_bgd_set_default_bg_index(m_eBgdIdx_style0);
+	gscene_bgd_set_state(BGD_STATUS_SHOW);
+	app_root_cmd2self(para,APP_HOME_ID, SWITCH_TO_OTHER_APP,ID_HOME_WIFI_PLAY,GUI_MSG_WIFI_PLAY_MAIN);  
+	return EPDK_OK;
+}
+
+static __s32  app_root_cover_play_mode(char *FileName)
+{
+	char *name_made;
+	name_made = FileName + eLIBs_strlen(FileName) -7;
+	if(name_made == NULL)
+	{
+		return ROOT_SW_TO_MAIN;
+	}
+	if(eLIBs_strncmp(name_made,WECHAT_VOICE,eLIBs_strlen(WECHAT_VOICE)) == 0 &&
+		eLIBs_strncmp(FileName,STRING_WECHAT_VOICE,eLIBs_strlen(STRING_WECHAT_VOICE)) == 0)
+	{
+		return ROOT_SW_TO_VOICE;
+	}
+	else if(eLIBs_strncmp(name_made,WECHAT_PHOTO,eLIBs_strlen(WECHAT_PHOTO)) == 0 && 
+		eLIBs_strncmp(FileName,STRING_WECHAT_PHOTO,eLIBs_strlen(STRING_WECHAT_PHOTO)) == 0)
+	{
+		return ROOT_SW_TO_PHOTO;
+	}
+	else if(eLIBs_strncmp(name_made,WECHAT_VIDEO,eLIBs_strlen(WECHAT_VIDEO)) == 0 &&
+		eLIBs_strncmp(FileName,STRING_WECHAT_VIDEO,eLIBs_strlen(STRING_WECHAT_VIDEO)) == 0)
+	{
+		return ROOT_SW_TO_MOVIE;
+	}
+	else
+	{
+		return ROOT_SW_TO_MAIN;
+	}
+}
+static __s32  app_root_cover_rename(char *filename,char *name,__u8 mode)
+{
+	__s32 ret;
+	 char new_name[128] = {0},new_name_pt[256] = {0},new_file_name[128] = {0};
+	char *new_name_strings,*new_file;
+	if(mode == ROOT_SW_TO_MAIN)
+	{
+		return EPDK_FAIL;
+	}
+	eLIBs_memset(new_file_name,0,sizeof(new_file_name));
+	new_file = eLIBs_strchrlast(filename, '\\');
+	if(new_file != NULL)
+	{
+		eLIBs_strcpy(new_name,new_file + 1);
+		new_name_strings = eLIBs_strstr(new_name,NEW_FILE_NAME);
+		if((new_name_strings != NULL) && (new_name_strings[eLIBs_strlen(NEW_FILE_NAME)] == '~' )
+			&& (new_name[0] == '~'))
+		{
+			eLIBs_strncpy(new_name_pt,new_name,new_name_strings - new_name);
+			eLIBs_strcat(new_name_pt,new_name_strings + eLIBs_strlen(NEW_FILE_NAME));
+			eLIBs_strncpy(new_file_name,filename,new_file - filename);
+			eLIBs_strcat(new_file_name,"\\");
+			eLIBs_strcat(new_file_name,new_name_pt);
+			ret = eLIBs_rename(new_file_name,filename);
+			if(ret == EPDK_FAIL)
+			{
+				return EPDK_FAIL;
+			}
+			switch(app_root_cover_play_mode(filename))
+			{
+				case ROOT_SW_TO_MAIN:
+				{
+					eLIBs_strcpy(name,new_file_name);
+					return ROOT_SW_TO_MAIN;
+				}
+				case ROOT_SW_TO_PHOTO:
+				{
+					eLIBs_strcpy(name,new_file_name);
+					return ROOT_SW_TO_MAIN;
+				}
+				case ROOT_SW_TO_MOVIE:
+				{
+					char new_name_mode[128] = {0};
+					eLIBs_strcpy(new_name,filename);
+					new_file = eLIBs_strchrlast(new_name,'.');
+					if(new_file ==	NULL)
+					{
+						eLIBs_rename(filename,new_file_name);
+						return EPDK_FAIL;
+					}
+					eLIBs_strcpy(new_file + 1,WECHAT_PHOTO);
+					eLIBs_strcpy(new_name_mode,new_file_name);
+					new_file = eLIBs_strchrlast(new_name_mode,'.');
+					if(new_file ==	NULL)
+					{
+						eLIBs_rename(filename,new_file_name);
+						return EPDK_FAIL;
+					}
+					eLIBs_strcpy(new_file + 1,WECHAT_PHOTO);
+					ret = eLIBs_rename(new_name_mode,new_name);
+					eLIBs_strcpy(name,new_name_mode);
+					return ROOT_SW_TO_MOVIE;
+				}
+				case ROOT_SW_TO_VOICE:
+				{
+					char new_name_mode[128] = {0};
+					eLIBs_strcpy(new_name,filename);
+					new_file = eLIBs_strchrlast(new_name,'.');
+					if(new_file ==	NULL)
+					{
+						eLIBs_rename(filename,new_file_name);
+						return EPDK_FAIL;
+					}
+					eLIBs_strcpy(new_file + 1,WECHAT_PHOTO);
+					eLIBs_strcpy(new_name_mode,new_file_name);
+					new_file = eLIBs_strchrlast(new_name_mode,'.');
+					if(new_file ==	NULL)
+					{
+						eLIBs_rename(filename,new_file_name);
+						return EPDK_FAIL;
+					}
+					eLIBs_strcpy(new_file + 1,WECHAT_PHOTO);
+					ret = eLIBs_rename(new_name_mode,new_name);
+					eLIBs_strcpy(name,new_name_mode);
+					return ROOT_SW_TO_VOICE;
+				}
+				default:
+					break;
+			}
+		}
+	}
+	return EPDK_FAIL;
+}
+static __s32  __app_root_to_video(root_ctrl_t *para , __s32 rat_root_type)
+{
+	__movie_create_mode_e tv_mode;
+	if(!para)
+	{
+		__err("invalid para...\n");
+	}
+	if(RAT_TF != rat_root_type && RAT_USB != rat_root_type)
+	{
+		__wrn("rat_root_type type error,do not play video...\n");
+		return EPDK_FAIL;
+	}
+	if(NULL != para->h_app_movie && para->root_para->root_type == rat_root_type)
+	{
+		__wrn("movie alreadly running...\n");
+		return EPDK_FAIL;
+	}
+	app_root_delete_all_app(para);
+	para->root_para->explr_root = rat_root_type;
+	para->root_para->tv_mode = MOVIE_MODE_NORMAL;
+	app_root_play_app_sounds(SHORT_KEY_WAVE_FILE_MOVIE);
+	app_root_cmd2self(para, APP_HOME_ID, SWITCH_TO_OTHER_APP, ID_MOVIE_SHORTCUT, rat_root_type);
+	return EPDK_OK;
+}
+static __s32  __app_root_to_photo(root_ctrl_t *para , __s32 rat_root_type)
+{
+
+	if(!para)
+	{
+		__err("invalid para...\n");
+	}
+	if(RAT_TF != rat_root_type && RAT_USB != rat_root_type)
+	{
+		__wrn("rat_root_type type error,do not play video...\n");
+		return EPDK_FAIL;
+	}
+
+	if(NULL != para->h_app_photo && para->root_para->root_type == rat_root_type)
+	{
+		__wrn("photo alreadly running...\n");
+		return EPDK_FAIL;
+	}
+	app_root_delete_all_app(para);
+	para->root_para->explr_root = rat_root_type;
+	app_root_cmd2self(para, APP_HOME_ID, SWITCH_TO_OTHER_APP, ID_PHOTO_SHORTCUT, rat_root_type);
+	return EPDK_OK;
+}
+
+static __s32  __app_root_to_wechatvoice(root_ctrl_t *para , __u32 rat_root_type, __s32 play_modes) 
+{
+	if(!para)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL; 
+	}
+	if(RAT_TF != rat_root_type && RAT_USB != rat_root_type)
+	{
+		__wrn("rat_root_type type error,do not play video...\n");	
+		return EPDK_FAIL;
+	}
+	app_root_delete_all_app(para);
+	para->root_para->explr_root = rat_root_type;
+	app_root_play_app_sounds(SHORT_KEY_WAVE_FILE_MUSIC);
+	app_root_cmd2self(para, APP_HOME_ID, SWITCH_TO_OTHER_APP, ID_WECHAT_VOICE, rat_root_type);
+	return EPDK_OK;
+}
+
+static __s32  __app_root_to_wechatvideo(root_ctrl_t *para, __u32 rat_root_type, __s32 play_modes) 
+{
+	if(!para)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}
+
+	if(RAT_TF != rat_root_type && RAT_USB != rat_root_type)
+	{
+		return EPDK_FAIL;
+	}
+	if(NULL != para->h_app_movie && para->root_para->root_type == rat_root_type)
+	{
+		return EPDK_FAIL;
+	}
+	app_root_delete_all_app(para);
+	para->root_para->explr_root = rat_root_type;
+	para->root_para->tv_mode = MOVIE_MODE_NORMAL;
+	app_root_play_app_sounds(SHORT_KEY_WAVE_FILE_MOVIE);
+	app_root_cmd2self(para, APP_EXPLORER_ID, SWITCH_TO_OTHER_APP, EXPLR_SW_TO_MOVIE, rat_root_type);
+	return EPDK_OK;
+}
+
+static __s32  __app_root_to_wechatphoto(root_ctrl_t *para ,__u32 rat_root_type, __s32 auto_play_flag)
+{
+	if(!para)
+	{
+		__err("invalid para...\n");
+
+		return EPDK_FAIL;
+	}
+	if(RAT_TF != rat_root_type && RAT_USB != rat_root_type)
+	{
+		__wrn("rat_root_type type error,do not play video...\n");
+		return EPDK_FAIL;
+	}
+	if(NULL != para->h_app_photo && para->root_para->root_type == rat_root_type)
+	{
+		__wrn("photo alreadly running...\n");
+		return EPDK_FAIL;
+	}
+	app_root_delete_all_app(para);
+	para->root_para->explr_root 			= rat_root_type;
+	para->root_para->photo_auto_play_flag 	= auto_play_flag;
+	para->root_para->photo_enter_mode 		= 1;
+	exp_play_mode->play_state = EXPLOROER_SW_TO_PHOTO;
+	app_root_cmd2self(para, APP_HOME_ID, SWITCH_TO_OTHER_APP, ID_PHOTO_SHORTCUT, MAKELONG(rat_root_type, para->root_para->photo_enter_mode)); 
+	return EPDK_OK;
+}
+
+static void   app_home_restore_ex(root_ctrl_t *root_ctrl)
+{
+	if(NULL == root_ctrl)
+	{
+		__err("invalid para...\n");
+		return;
+	}
+	if(root_ctrl->h_app_home)
+	{
+		__gui_msg_t mymsg;
+		mymsg.h_deswin = root_ctrl->h_app_home;
+		mymsg.id = DSK_APP_RESTORE;
+		mymsg.dwAddData1 = 0;
+		mymsg.dwAddData2 = 0;
+		GUI_SendNotifyMessage(&mymsg);
+		mymsg.h_deswin = root_ctrl->h_app_home;
+		mymsg.id = DSK_MSG_FS_PART_PLUGOUT;
+		mymsg.dwAddData1 = 0;
+		mymsg.dwAddData2 = 0;
+		GUI_SendNotifyMessage(&mymsg);
+		app_root_set_focuschild(root_ctrl->h_app_home, 0);
+	}
+	else
+	{
+		root_ctrl->h_app_home = app_home_create(root_ctrl->root_para);
+		app_root_set_focuschild(root_ctrl->h_app_home, 1);
+	}
+}
+
+static void   app_home_restore(__gui_msg_t *msg)
+{
+	root_ctrl_t   *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	gscene_hbar_get_state(&root_ctrl->hbar_stata);
+	if(root_ctrl->hbar_stata == HBAR_ST_SHOW)
+	{
+		gscene_hbar_set_state(HBAR_ST_HIDE);
+	}
+	app_home_restore_ex(root_ctrl);
+	gscene_hbar_back_state(0);
+}
+
+static __s32  app_root_set_wechat_playfile(rat_root_t rat_root_type, rat_media_type_t rat_media_type, E_MEDIA_TYPE_LIST wechat_media_type)
+{
+	char file_path[RAT_MAX_FULL_PATH_LEN];
+	HRAT hrat = NULL;
+	__u32 total = 0;
+	__u32 last_file_index = 0;
+	char *last_file_path = NULL;
+	reg_root_para_t *para;
+	int ret;
+	rat_entry_t ItemInfo;
+
+	if(RAT_UNKNOWN == rat_root_type || RAT_MEDIA_TYPE_UNKNOWN == rat_media_type)
+	{
+		return EPDK_FAIL;
+	}
+
+	eLIBs_memset(file_path, 0, sizeof(file_path));
+	ret = app_root_get_search_path(rat_root_type, file_path);
+
+	if(EPDK_FAIL == ret || eLIBs_strlen(file_path) == 0)
+	{
+		return EPDK_FAIL;
+	}
+	switch(wechat_media_type)
+	{
+		case m_eMediaTypeList_wechatphoto:
+			hrat = rat_open(STRING_WECHAT_PHOTO, RAT_MEDIA_TYPE_PIC, 0);
+			break;
+		default:
+			break;
+	}
+	if(hrat == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	total = rat_get_cur_scan_cnt(hrat);
+	if(total == 0)
+	{
+		return EPDK_FAIL;
+	}
+	para = (reg_root_para_t *)dsk_reg_get_para_by_app(REG_APP_ROOT);
+	if(para == NULL)
+	{
+		return EPDK_FAIL;
+	}
+
+	if(RAT_MEDIA_TYPE_VIDEO == rat_media_type)
+	{
+		if(rat_root_type == RAT_TF)
+		{
+			last_file_index = para->last_movie_index_sd;
+			last_file_path = para->last_movie_path_sd;
+		}
+		else
+		{
+			last_file_index = para->last_movie_index_ud;
+			last_file_path = para->last_movie_path_ud;
+		}
+	}
+	else if(RAT_MEDIA_TYPE_AUDIO == rat_media_type)
+	{
+		if(rat_root_type == RAT_TF)
+		{
+			last_file_index = para->last_music_index_sd;
+			last_file_path = para->last_music_path_sd;
+		}
+		else
+		{
+			last_file_index = para->last_music_index_ud;
+			last_file_path = para->last_music_path_ud;
+		}
+	}
+	else if(RAT_MEDIA_TYPE_PIC == rat_media_type)
+	{
+		if(rat_root_type == RAT_TF)
+		{
+			last_file_index = para->last_photo_index_sd;
+			last_file_path = para->last_photo_path_sd;
+		}
+		else
+		{
+			last_file_index = para->last_photo_index_ud;
+			last_file_path = para->last_photo_path_ud;
+		}
+	}
+
+	eLIBs_memset(&ItemInfo, 0, sizeof(rat_entry_t));
+	ret = rat_get_item_info_by_index(hrat, last_file_index, &ItemInfo);
+
+	if(ret == EPDK_OK)
+	{
+		eLIBs_memset(file_path, 0, sizeof(file_path));
+		eLIBs_strcpy(file_path, ItemInfo.Path);
+		ret = eLIBs_strcmp(file_path, last_file_path);
+
+		if(ret == 0)		//锟斤拷锟�,锟津播凤拷锟斤拷一锟轿碉拷锟侥硷拷
+		{
+			rat_set_file_for_play(hrat, last_file_path);
+			return EPDK_OK;
+		}
+	}
+
+	ret = rat_get_item_info_by_index(hrat, 0, &ItemInfo);	//直锟接诧拷锟脚碉拷一锟斤拷
+
+	if(ret == EPDK_OK)
+	{
+		eLIBs_memset(file_path, 0, sizeof(file_path));
+		eLIBs_strcpy(file_path, ItemInfo.Path);
+		rat_set_file_for_play(hrat, file_path);
+		return EPDK_OK;
+	}
+
+	return EPDK_FAIL;
+}
+
+static __s32  app_root_set_new_msg_wechat_playfile( E_MEDIA_TYPE_LIST wechat_media_type)
+{
+	char file_path[RAT_MAX_FULL_PATH_LEN];
+	HRAT hrat = NULL;
+	__u32 total = 0;
+	__u32 last_file_index = 0;
+	char *last_file_path = NULL;
+	reg_root_para_t *para;
+	int ret;
+	rat_entry_t ItemInfo;
+	switch(wechat_media_type)
+	{
+		case m_eMediaTypeList_wechatphoto:
+			rat_clear_all_list();
+			eLIBs_strcpy(file_path, STRING_WECHAT_PHOTO);
+			hrat = rat_open(file_path, RAT_MEDIA_TYPE_PIC, 0);
+			break;
+		case m_eMediaTypeList_wechatvideo:
+			rat_clear_all_list();
+			eLIBs_strcpy(file_path, STRING_WECHAT_VIDEO);
+			hrat = rat_open(file_path, RAT_MEDIA_TYPE_VIDEO, 0);	
+			break;
+		case m_eMediaTypeList_wechatvoice:
+			rat_clear_all_list();
+			eLIBs_strcpy(file_path, STRING_WECHAT_VOICE);
+			hrat = rat_open(file_path, RAT_MEDIA_TYPE_AUDIO, 0);				
+			break;
+		default:
+			break;
+	}
+	if(hrat == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	total = rat_get_cur_scan_cnt(hrat);
+	if(total == 0)
+	{
+		return EPDK_FAIL;
+	}
+	if(hrat)
+	{
+		eLIBs_memset(&ItemInfo, 0, sizeof(rat_entry_t));
+		if(m_eMediaTypeList_wechatvideo == wechat_media_type)
+			ret = rat_get_item_info_by_index(hrat, total-1, &ItemInfo);
+		else
+			ret = rat_get_item_info_by_index(hrat, 0, &ItemInfo);
+		eLIBs_memset(file_path, 0, sizeof(file_path));
+		eLIBs_strcpy(file_path, ItemInfo.Path);
+		rat_set_file_for_play(hrat, file_path);
+	}
+	return EPDK_OK;
+}
+static __s32  __app_root_set_playfile(rat_root_t rat_root_type, rat_media_type_t rat_media_type)
+{
+	char file_path[RAT_MAX_FULL_PATH_LEN];
+	HRAT hrat = NULL;
+	__u32 total = 0;
+	__u32 last_file_index = 0;
+	char *last_file_path = NULL;
+	reg_root_para_t *para;
+	int ret;
+	rat_entry_t ItemInfo;
+	if(RAT_UNKNOWN == rat_root_type || RAT_MEDIA_TYPE_UNKNOWN == rat_media_type)
+	{
+		return EPDK_FAIL;
+	}
+	eLIBs_memset(file_path, 0, sizeof(file_path));
+	ret = app_root_get_search_path(rat_root_type, file_path);
+	if(EPDK_FAIL == ret || eLIBs_strlen(file_path) == 0)
+	{
+		return EPDK_FAIL;
+	}
+	hrat = rat_open_ex(rat_root_type, rat_media_type, 0);
+	if(hrat == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	total = rat_get_cur_scan_cnt(hrat);
+	if(total == 0)
+	{
+		return EPDK_FAIL;
+	}
+	para = (reg_root_para_t *)dsk_reg_get_para_by_app(REG_APP_ROOT);
+	if(para == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	if(RAT_MEDIA_TYPE_VIDEO == rat_media_type)
+	{
+		if(rat_root_type == RAT_TF)
+		{
+			last_file_index = para->last_movie_index_sd;
+			last_file_path = para->last_movie_path_sd;
+		}
+		else
+		{
+			last_file_index = para->last_movie_index_ud;
+			last_file_path = para->last_movie_path_ud;
+		}
+	}
+	else if(RAT_MEDIA_TYPE_AUDIO == rat_media_type)
+	{
+		if(rat_root_type == RAT_TF)
+		{
+			last_file_index = para->last_music_index_sd;
+			last_file_path = para->last_music_path_sd;
+		}
+		else
+		{
+			last_file_index = para->last_music_index_ud;
+			last_file_path = para->last_music_path_ud;
+		}
+	}
+	else if(RAT_MEDIA_TYPE_PIC == rat_media_type)
+	{
+		if(rat_root_type == RAT_TF)
+		{
+			last_file_index = para->last_photo_index_sd;
+			last_file_path = para->last_photo_path_sd;
+		}
+		else
+		{
+			last_file_index = para->last_photo_index_ud;
+			last_file_path = para->last_photo_path_ud;
+		}
+	}
+	eLIBs_memset(&ItemInfo, 0, sizeof(rat_entry_t));
+	ret = rat_get_item_info_by_index(hrat, last_file_index, &ItemInfo);
+	if(ret == EPDK_OK)
+	{
+		eLIBs_memset(file_path, 0, sizeof(file_path));
+		eLIBs_strcpy(file_path, ItemInfo.Path);
+		ret = eLIBs_strcmp(file_path, last_file_path);
+		if(ret == 0)		
+		{
+			rat_set_file_for_play(hrat, last_file_path);
+			return EPDK_OK;
+		}
+	}
+	ret = rat_get_item_info_by_index(hrat, 0, &ItemInfo);	
+	if(ret == EPDK_OK)
+	{
+		eLIBs_memset(file_path, 0, sizeof(file_path));
+		eLIBs_strcpy(file_path, ItemInfo.Path);
+		rat_set_file_for_play(hrat, file_path);
+		return EPDK_OK;
+	}
+	return EPDK_FAIL;
+}
+
+static rat_root_t app_root_get_rat_root_type(__s32 reg_storage_type)
+{
+	rat_root_t rat_root_type;
+	rat_root_type = RAT_UNKNOWN;
+	if(0 == reg_storage_type)
+	{
+	  rat_root_type = RAT_TF;
+	}
+	else if(1 == reg_storage_type)
+	{
+	  rat_root_type = RAT_USB;
+	}
+	else
+	{
+	  __wrn("--reg_storage_type type error--\n");
+	  rat_root_type = RAT_TF;
+	}
+	return rat_root_type;
+}
+
+static rat_media_type_t __app_root_get_rat_media_type(__s32 reg_media_type)
+{
+	rat_media_type_t rat_media_type;
+	rat_media_type = RAT_MEDIA_TYPE_UNKNOWN;
+	switch(reg_media_type)
+	{
+		case m_eMediaTypeList_video :
+  		case m_eMediaTypeList_guoxue:
+  		case m_eMediaTypeList_shuxue:
+  		case m_eMediaTypeList_yingyu:
+  		case m_eMediaTypeList_tangshi:
+  		case m_eMediaTypeList_donghua:
+  		case m_eMediaTypeList_erge:
+  		case m_eMediaTypeList_gushi:
+  		{
+			
+			break;
+		}
+		case m_eMediaTypeList_audio:
+			rat_media_type = RAT_MEDIA_TYPE_AUDIO;
+			break;
+		case m_eMediaTypeList_photo:
+			rat_media_type = RAT_MEDIA_TYPE_PIC;
+			break;
+		case m_eMediaTypeList_wechatphoto:
+			rat_media_type = RAT_MEDIA_TYPE_PIC;
+			break;
+		default :
+			rat_media_type = RAT_MEDIA_TYPE_AUDIO;
+			break;
+	}
+
+	return rat_media_type;
+}
+
+static __s32  __app_root_get_reg_storage_type(unsigned char root)
+{
+	__s32 i;
+	__s32 ret;
+	char disk_name[RAT_MAX_PARTITION][4];
+	char cur_disk_name[2];
+	eLIBs_memset(cur_disk_name, 0, sizeof(cur_disk_name));
+	cur_disk_name[0] = root;
+	__wrn("cur_disk_name=%s\n", cur_disk_name);
+	eLIBs_memset(disk_name , 0 , sizeof(disk_name)) ;
+	ret = rat_get_partition_name(RAT_SD_CARD, disk_name);
+	if(EPDK_OK == ret)
+	{
+		i = 0;
+		while(i < RAT_MAX_PARTITION && disk_name[i][0])
+		{
+			__wrn("disk_name[%d]=%s\n", i, disk_name[i]);
+
+			if(0 == eLIBs_strnicmp(disk_name[i], cur_disk_name, 1))
+			{
+				return 0;
+			}
+
+			i++;
+		}
+	}
+
+	eLIBs_memset(disk_name , 0 , sizeof(disk_name)) ;
+	ret = rat_get_partition_name(RAT_USB_DISK, disk_name);
+
+	if(EPDK_OK == ret)
+	{
+		i = 0;
+
+		while(i < RAT_MAX_PARTITION && disk_name[i][0])
+		{
+			__wrn("disk_name[i]=%s\n", disk_name[i]);
+
+			if(0 == eLIBs_strnicmp(disk_name[i], cur_disk_name, 1))
+			{
+				return 1;
+			}
+
+			i++;
+		}
+	}
+
+	return -1;
+}
+static __s32  __app_root_get_reg_storage_type2(rat_root_t rat_root_type)
+{
+	__s32 reg_root_type;
+	reg_root_type = 0;
+
+	if(RAT_TF == rat_root_type)
+	{
+		reg_root_type = 0;
+	}
+	else if(RAT_USB == rat_root_type)
+	{
+		reg_root_type = 1;
+	}
+
+	return reg_root_type;
+}
+
+static __s32  app_root_get_search_path(rat_root_t rat_root_type, char *search_path)
+{
+	__s32 ret;
+	char str_type[50];
+	char disk_name[RAT_MAX_PARTITION][4];
+	eLIBs_memset(str_type, 0, sizeof(str_type));
+	eLIBs_memset(disk_name, 0, sizeof(disk_name));
+	eLIBs_memset(search_path, 0, sizeof(search_path));
+
+	switch(rat_root_type)
+	{
+		case RAT_LOCAL:
+			eLIBs_strcpy(str_type, RAT_LOCAL_DISK);
+			break;
+
+		case RAT_TF:
+			eLIBs_strcpy(str_type, RAT_SD_CARD);
+			break;
+
+		case RAT_USB:
+			eLIBs_strcpy(str_type, RAT_USB_DISK);
+			break;
+
+		default:
+			return EPDK_FAIL;
+	}
+
+	__wrn("str_type=%s\n", str_type);
+	ret = rat_get_partition_name(str_type, disk_name);
+	eLIBs_strcpy(search_path, disk_name[0]);
+	__wrn("rat root type=%d\n", rat_root_type);
+	__wrn("search_path=%s\n", search_path);
+
+	if(0 == search_path[0])
+	{
+		return EPDK_FAIL;
+	}
+
+	return ret;
+}
+
+static __bool app_root_has_external_disk(__u32 type)
+{
+	__s32 ret;
+	char diskname[RAT_MAX_PARTITION][4];
+	if(type & APP_ROOT_TYPE_UD)
+	{
+		ret = rat_get_partition_name(RAT_USB_DISK, diskname);
+		if(EPDK_OK == ret)
+		{
+			if(diskname[0][0])
+			{
+			  return EPDK_TRUE;
+			}
+		}
+	}
+	if(type & APP_ROOT_TYPE_SD)
+	{
+		ret = rat_get_partition_name(RAT_SD_CARD, diskname);
+		if(EPDK_OK == ret)
+		{
+			if(diskname[0][0])
+			{
+			  return EPDK_TRUE;
+			}
+		}
+	}
+	return EPDK_FALSE;
+}
+
+static __s32  app_root_process_before_show_dlg(root_ctrl_t *root_ctrl)
+{
+	HBarState sta;
+
+	if(!root_ctrl)
+	{
+		return EPDK_FAIL;
+	}
+
+	gscene_hbar_get_state(&sta);
+
+	if(HBAR_ST_SHOW == sta)
+	{
+		root_ctrl->is_hbar_show_before_dlg = 1;
+	}
+	else
+	{
+		root_ctrl->is_hbar_show_before_dlg = 0;
+	}
+
+	gscene_hbar_set_state(HBAR_ST_HIDE);
+
+	if(root_ctrl->h_app_movie)
+	{
+		app_movie_notify_delete_sub_scene(root_ctrl->h_app_movie);
+	}
+
+	if(root_ctrl->h_app_photo)
+	{
+		app_photo_notify_delete_sub_scene(root_ctrl->h_app_photo);
+	}
+	if(root_ctrl->h_app_setting)
+	{
+		app_setting_notify_delete_sub_dlg_scene(root_ctrl->h_app_setting);
+	}
+	return EPDK_OK;
+}
+
+static __s32  app_root_process_after_show_dlg(root_ctrl_t *root_ctrl)
+{
+	if(!root_ctrl)
+	{
+		return EPDK_FAIL;
+	}
+	if(1 == root_ctrl->is_hbar_show_before_dlg)
+	{
+		gscene_hbar_set_state(HBAR_ST_SHOW);
+	}
+	else
+	{
+		gscene_hbar_set_state(HBAR_ST_HIDE);
+	}
+	if(root_ctrl->h_app_explorer)
+	{
+		GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+	}
+	else if(root_ctrl->h_app_net_explorer)
+	{
+		GUI_WinSetFocusChild(root_ctrl->h_app_net_explorer);
+	}
+	else if(root_ctrl->h_app_movie)
+	{
+		GUI_WinSetFocusChild(root_ctrl->h_app_movie);
+	}
+	else if(root_ctrl->h_app_karaok)
+	{
+		GUI_WinSetFocusChild(root_ctrl->h_app_karaok);
+	}
+	else if(root_ctrl->h_app_photo)
+	{
+		GUI_WinSetFocusChild(root_ctrl->h_app_photo);
+	}
+	else if(root_ctrl->h_app_setting)
+	{
+		GUI_WinSetFocusChild(root_ctrl->h_app_setting);
+	}
+	else if(root_ctrl->h_app_music && MUSICPLAYER_NORMAL == app_music_get_mode(root_ctrl->h_app_music))
+	{
+		GUI_WinSetFocusChild(root_ctrl->h_app_music);
+	}
+	else if(root_ctrl->h_app_weather)
+	{
+		GUI_WinSetFocusChild(root_ctrl->h_app_weather);
+	}
+	else if(root_ctrl->h_app_home&& MULTI_SCREEN_HOME_MODE_NORMAL == app_multi_screen_home_get_mode(root_ctrl->h_app_home))
+	{
+		GUI_WinSetFocusChild(root_ctrl->h_app_home);
+	}
+	else
+	{
+		
+	}
+	return EPDK_OK;
+}
+
+static __s32  app_root_show_dlg(H_WIN hwin, __s32 text_id, __s32 title_id, __s32 time)
+{
+	H_WIN dlg;
+	__s32 lang_id[2] = {STRING_ROOT_CUE, STRING_ROOT_NULL_DISK};
+
+	if(title_id)
+	{
+		lang_id[0] = title_id;
+	}
+
+	if(text_id)
+	{
+		lang_id[1] = text_id;
+	}
+
+	default_dialog(dlg, hwin, APP_COM_DLG_ID, ADLG_OK, lang_id);
+
+	if(0 != time)
+	{
+		esKRNL_TimeDly(time);
+	}
+	else
+	{
+		esKRNL_TimeDly(120);
+	}
+
+	app_dialog_destroy(dlg);
+}
+
+static __s32  app_root_show_err_info(root_ctrl_t *root_ctrl , __s32 init_media_type , __s32 init_storage_type
+                                    , app_root_prob_intent_t intent , app_root_prob_result_t err_code, __bool bHideHBar)
+{
+	__s32 text_id = 0;
+	reg_root_para_t *para = NULL;
+	para = (reg_root_para_t *)dsk_reg_get_para_by_app(REG_APP_ROOT);
+	if(!para)
+	{
+		__wrn("para is null...\n");
+		return EPDK_FAIL;
+	}
+	if(init_media_type < 0 && init_media_type >= BEETLES_TBL_SIZE(para->last_app_play_storage))
+	{
+		__wrn("media type error...\n");
+		return EPDK_FAIL;
+	}
+	if( (init_storage_type < 0 && init_storage_type >= BEETLES_TBL_SIZE(para->last_storage_play_app) ) )
+	{
+		__wrn("storage type is null...\n");
+		return EPDK_FAIL;
+	}
+	if(intent < 0 || intent >= app_root_prob_intent_max)
+	{
+		__wrn("intent type error...\n");
+		return EPDK_FAIL;
+	}
+	switch(intent)
+	{
+		case app_root_prob_intent_first_play:
+		{
+			if(app_root_prob_storage_plugined == err_code)
+			{
+				if(0 == init_storage_type)
+				{
+					switch(init_media_type)
+					{
+						case m_eMediaTypeList_video :
+							break;
+
+						case m_eMediaTypeList_audio:
+							break;
+						case m_eMediaTypeList_photo:
+							break;
+						case m_eMediaTypeList_wechatphoto:
+							break;						
+						default :
+							__wrn("init_media_type type error...\n");
+							break;
+					}
+				}
+				else if(1 == init_storage_type)
+				{
+					switch(init_media_type)
+					{
+						case m_eMediaTypeList_video :
+							break;
+
+						case m_eMediaTypeList_audio:
+							break;
+						case m_eMediaTypeList_photo:
+							break;
+						case m_eMediaTypeList_wechatphoto:
+							break;
+						default :
+							__wrn("init_media_type type error...\n");
+							break;
+					}
+				}
+				else
+				{
+					__wrn("init_storage_type type error...\n");
+				}
+			}
+			break;
+		}
+		case app_root_prob_intent_plugin_for_play:
+		{
+			if(app_root_prob_no_meida_file == err_code)
+			{
+				if(0 == init_storage_type)
+				{
+				}
+				else if(1 == init_storage_type)
+				{
+				}
+				else
+				{
+					__wrn("init_storage_type type error...\n");
+				}
+			}
+			else if(app_root_prob_storage_plugined == err_code)
+			{
+				if(0 == init_storage_type)
+				{
+				}
+				else if(1 == init_storage_type)
+				{
+				}
+				else
+				{
+					__wrn("init_storage_type type error...\n");
+				}
+			}
+			break;
+		}
+		case app_root_prob_intent_switch_media:
+		{
+			if(app_root_prob_no_correspond_storage == err_code)
+			{
+			}
+			else if(app_root_prob_no_meida_file == err_code)
+			{
+				switch(init_media_type)
+				{
+					case m_eMediaTypeList_video :
+						break;
+
+					case m_eMediaTypeList_audio:
+						break;
+					case m_eMediaTypeList_photo:
+						break;
+					case m_eMediaTypeList_wechatphoto:
+						break;
+					default :
+						break;
+				}
+			}
+			else if(app_root_prob_media_switch == err_code)
+			{
+				if(0 == init_storage_type)
+				{
+					switch(init_media_type)
+					{
+						case m_eMediaTypeList_video :
+							break;
+
+						case m_eMediaTypeList_audio:
+							break;
+						case m_eMediaTypeList_photo:
+							break;
+						case m_eMediaTypeList_wechatphoto:
+							break;
+						default :
+							__wrn("init_media_type type error...\n");
+							break;
+					}
+				}
+				else if(1 == init_storage_type)
+				{
+					switch(init_media_type)
+					{
+						case m_eMediaTypeList_video :
+							break;
+
+						case m_eMediaTypeList_audio:
+							break;
+						case m_eMediaTypeList_photo:
+							break;
+						case m_eMediaTypeList_wechatphoto:
+							break;
+						default :
+							__wrn("init_media_type type error...\n");
+							break;
+					}
+				}
+				else
+				{
+					__wrn("init_storage_type type error...\n");
+				}
+			}
+
+			break;
+		}
+		case app_root_prob_intent_switch_storage:
+		{
+			if(app_root_prob_no_correspond_storage == err_code)
+			{
+				if(0 == init_storage_type)
+				{
+				}
+				else if(1 == init_storage_type)
+				{
+				}
+				else
+				{
+					__wrn("init_storage_type type error...\n");
+				}
+			}
+			else if(app_root_prob_no_meida_file == err_code)
+			{
+				if(0 == init_storage_type)
+				{
+					switch(init_media_type)
+					{
+						case m_eMediaTypeList_video :
+							break;
+
+						case m_eMediaTypeList_audio:
+							break;
+						case m_eMediaTypeList_photo:
+							break;
+						case m_eMediaTypeList_wechatphoto:
+							break;
+						default :
+							__wrn("init_media_type type error...\n");
+							break;
+					}
+				}
+				else if(1 == init_storage_type)
+				{
+					switch(init_media_type)
+					{
+						case m_eMediaTypeList_video :
+							break;
+
+						case m_eMediaTypeList_audio:
+							break;
+						case m_eMediaTypeList_photo:
+							break;
+						case m_eMediaTypeList_wechatphoto:
+							break;
+						default :
+							__wrn("init_media_type type error...\n");
+							break;
+					}
+				}
+				else
+				{
+					__wrn("init_storage_type type error...\n");
+				}
+			}
+			else if(app_root_prob_storage_switch == err_code)
+			{
+				if(0 == init_storage_type)
+				{
+					switch(init_media_type)
+					{
+						case m_eMediaTypeList_video :
+							break;
+
+						case m_eMediaTypeList_audio:
+							break;
+						case m_eMediaTypeList_photo:
+							break;
+						case m_eMediaTypeList_wechatphoto:
+							break;
+						default :
+							__wrn("init_media_type type error...\n");
+							break;
+					}
+				}
+				else if(1 == init_storage_type)
+				{
+					switch(init_media_type)
+					{
+						case m_eMediaTypeList_video :
+							break;
+
+						case m_eMediaTypeList_audio:
+							break;
+						case m_eMediaTypeList_photo:
+							break;
+						case m_eMediaTypeList_wechatphoto:
+							break;
+						default :
+							__wrn("init_media_type type error...\n");
+							break;
+					}
+				}
+				else
+				{
+					__wrn("init_storage_type type error...\n");
+				}
+			}
+
+			break;
+		}
+		case app_root_prob_intent_unknown:
+		{
+			if(app_root_prob_no_correspond_storage == err_code)
+			{
+			}
+			break;
+		}
+		default:
+		{
+			__wrn("intent type error...\n");
+			return EPDK_FAIL;
+
+		}
+	}
+	if(text_id)
+	{
+          HBarState sta;
+          app_root_process_before_show_dlg(root_ctrl);
+          if(bHideHBar)
+          {
+            gscene_hbar_get_state(&sta);
+            gscene_hbar_set_state(HBAR_ST_HIDE);
+          }
+          app_root_show_dlg(root_ctrl->root_para->h_parent , text_id, 0, 0);
+          if(bHideHBar)
+          {
+            gscene_hbar_set_state(sta);
+          }
+          app_root_process_after_show_dlg(root_ctrl);
+	}
+	return EPDK_OK;
+}
+
+static __s32  app_root_play_other_storages_on_plugout(root_ctrl_t *root_ctrl)
+{
+	__s32 ret;
+	__s32 reg_media_type;
+	__s32 reg_storage_type;
+	reg_root_para_t *para;
+	para = (reg_root_para_t *)dsk_reg_get_para_by_app(REG_APP_ROOT);
+
+	if(!para)
+	{
+		__wrn("para is null...\n");
+		return EPDK_FAIL;
+	}
+
+	if(NULL == root_ctrl)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}
+
+	reg_media_type = -1;
+	reg_storage_type = para->cur_play_storage;
+	if(root_ctrl->h_app_photo)
+	{
+		reg_media_type = m_eMediaTypeList_photo;
+	}
+	else if(root_ctrl->h_app_movie)
+	{
+		reg_media_type = m_eMediaTypeList_video;
+	}
+	else if(root_ctrl->h_app_music)
+	{
+		reg_media_type = m_eMediaTypeList_audio;
+	}
+	else
+	{
+		reg_media_type = -1;
+		__wrn("no media playing...\n");
+		return EPDK_FAIL;
+	}
+
+	root_ctrl->switchMediaEnable_flag = 1;
+	ret = app_root_shortcut_process(root_ctrl, app_root_prob_intent_switch_storage, reg_media_type, reg_storage_type, EPDK_FALSE, EPDK_FALSE);
+	root_ctrl->switchMediaEnable_flag = 0;
+	return ret;
+}
+
+//媒锟斤拷探锟斤拷
+//init_media_type:锟斤拷锟节达拷锟教斤拷锟矫碉拷锟斤拷媒锟斤拷锟斤拷锟斤拷0:锟斤拷锟斤拷 1:锟斤拷频
+//init_storage_type:锟斤拷锟节达拷锟教斤拷锟矫碉拷锟斤拷媒锟斤拷锟斤拷锟斤拷锟斤拷锟�0:锟斤拷 1:u锟斤拷
+//intent:探锟解方式
+//锟斤拷锟斤拷:EPDK_OK锟斤拷探锟斤拷晒锟斤拷锟紼PDK_FAIL锟斤拷探锟斤拷失锟杰ｏ拷*err_code锟斤拷糯锟斤拷锟斤拷锟斤拷
+static __s32  app_root_prob_media_file_for_play(root_ctrl_t *root_ctrl , __s32 *init_media_type , __s32 *init_storage_type
+    , app_root_prob_intent_t intent , app_root_prob_result_t *err_code)
+{
+	__bool bhas_disk;
+	__s32 reg_storage_type;
+	__s32 reg_media_type;
+	reg_root_para_t *para;
+	rat_media_type_t rat_media_type;
+	__u8 storageShiftCnt = 0;
+	para = (reg_root_para_t *)dsk_reg_get_para_by_app(REG_APP_ROOT);
+	if(!para)
+	{
+		__wrn("para is null...\n");
+		goto fail;
+	}
+
+	if(!init_media_type ||
+	    (*init_media_type < 0
+	     && *init_media_type >= BEETLES_TBL_SIZE(para->last_app_play_storage)
+	    )
+	  )
+	{
+		__wrn("media type error...\n");
+		goto fail;
+	}
+
+	if(!init_storage_type)
+	{
+		__wrn("storage type is null...\n");
+		goto fail;
+	}
+
+	if(intent < 0 || intent >= app_root_prob_intent_max)
+	{
+		__wrn("intent type error...\n");
+		goto fail;
+	}
+
+	reg_storage_type = *init_storage_type;
+	reg_media_type = *init_media_type;
+	bhas_disk = EPDK_FALSE;
+	do
+	{
+		__s32 ret;
+		rat_root_t rat_root_type;
+		HRAT hrat;
+		__u32 media_cnt;
+		__s32 cur_reg_root_type;
+		char path[RAT_MAX_FULL_PATH_LEN];
+		__wrn("begin search media file, reg_storage_type=%d, reg_media_type=%d\n"
+		      , reg_storage_type, reg_media_type);
+		rat_root_type = app_root_get_rat_root_type(reg_storage_type);
+
+		if(RAT_UNKNOWN == rat_root_type)
+		{
+			__wrn("rat_root_type error...\n");
+			goto fail;
+		}
+
+		rat_media_type = __app_root_get_rat_media_type(reg_media_type);
+		if(RAT_MEDIA_TYPE_UNKNOWN == rat_media_type)
+		{
+			__wrn("rat_media_type error...\n");
+                  			goto fail;
+		}
+
+		eLIBs_memset(path, 0, sizeof(path));
+		ret = app_root_get_search_path(rat_root_type, path);
+
+		if(EPDK_FAIL == ret)//锟睫达拷锟斤拷
+		{
+			__wrn("no such disk, reg_storage_type=%d\n", reg_storage_type);
+
+			if(app_root_prob_intent_first_play == intent)
+			{
+				__wrn("intent is first_play, not need switch storage, intent=%d...\n", intent);
+				goto next_storage;	//no_storage;
+			}
+			else if(app_root_prob_intent_plugin_for_play == intent)
+			{
+				__wrn("may not run here...\n");
+				goto no_media_file;
+			}
+			else if(app_root_prob_intent_switch_media == intent)
+			{
+				__wrn("intent is switch_media, goto next_storage\n");
+				goto next_storage;
+			}
+			else if(app_root_prob_intent_switch_storage == intent)
+			{
+				__wrn("intent is switch_storage, goto next_storage\n");
+				goto next_storage;
+			}
+			else
+			{
+				__wrn("intent type error...\n");
+				goto fail;
+			}
+		}
+
+		bhas_disk = EPDK_TRUE;
+		media_cnt = 0;
+		//hrat = rat_open(path, rat_media_type, 0);
+
+		if((reg_media_type >= m_eMediaTypeList_guoxue) && (reg_media_type <= m_eMediaTypeList_gushi))
+		{
+			char str_buff[128], path_buff[128];
+			//锟斤拷锟斤拷锟斤拷源锟斤拷锟�;
+			get_menu_text(story_dir_path[reg_media_type-m_eMediaTypeList_guoxue], str_buff, sizeof(str_buff));
+			eLIBs_strcpy(path_buff, "f:\\");
+			eLIBs_strcat(path_buff, str_buff);
+			hrat = rat_open(path_buff, RAT_MEDIA_TYPE_VIDEO, 0);
+		}		
+		else if(reg_media_type > m_eMediaTypeList_theater)
+		{
+			switch(reg_media_type)
+			{
+				case m_eMediaTypeList_wechatphoto:
+					hrat = rat_open(STRING_WECHAT_PHOTO, RAT_MEDIA_TYPE_PIC, 0);
+					break;
+				default:
+					break;
+			}
+		}
+		else
+		{
+			hrat = rat_open_ex(rat_root_type, rat_media_type, 0);
+		}
+		
+		if(hrat)
+		{
+			media_cnt = rat_get_cur_scan_cnt(hrat);
+		}
+
+		if(NULL == hrat || 0 == media_cnt)
+		{
+			__wrn("no such media file, reg_media_type=%d\n"
+			      , reg_media_type);
+
+			if(app_root_prob_intent_first_play == intent)
+			{
+				__wrn("intent is first_play, not need switch storage, intent=%d...\n", intent);
+				goto next_media_type;	
+			}
+			else if(app_root_prob_intent_plugin_for_play == intent)
+			{
+				__wrn("intent is plugin_for_play, goto no_media_file...\n");
+				goto next_media_type;
+			}
+			else if(app_root_prob_intent_switch_media == intent)
+			{
+				__wrn("intent is switch_media, goto next_storage\n");
+				goto next_storage;
+			}
+			else if(app_root_prob_intent_switch_storage == intent)
+			{
+				__wrn("intent is switch_storage, goto next_storage\n");
+
+				if(root_ctrl->switchMediaEnable_flag == 1)
+				{
+					goto next_media_type;
+				}
+				else
+				{
+					goto next_storage;
+				}
+			}
+			else
+			{
+				__wrn("intent type error...\n");
+				goto fail;
+			}
+		}
+
+		//探锟斤拷晒锟�
+		break;
+	next_storage:
+		;
+		reg_storage_type++;
+		if(reg_storage_type >= BEETLES_TBL_SIZE(para->last_storage_play_app))
+		{
+			reg_storage_type = 0;
+		}
+		//锟斤拷锟姐当前锟斤拷锟斤拷锟教凤拷锟斤拷锟教凤拷锟叫伙拷锟斤拷锟斤拷锟叫伙拷锟斤拷锟斤拷前锟教凤拷
+		cur_reg_root_type = para->cur_play_storage;
+		{
+			if(++storageShiftCnt >= BEETLES_TBL_SIZE(para->last_storage_play_app))
+			{
+				if(EPDK_FALSE == bhas_disk)
+				{
+					__wrn("search finish, not any reg root type\n");
+					goto no_storage;
+				}
+				else
+				{
+					__wrn("search finish, no more reg root type\n");
+					goto no_media_file;
+				}
+			}
+		}
+		__wrn("try to switch to reg root type:%d\n", reg_storage_type);
+		continue;
+	next_media_type:
+		;
+		__wrn("app_root_prob_media_file_for_play: next_media_type\n");
+		reg_media_type++;
+
+		if(reg_media_type >= BEETLES_TBL_SIZE(para->last_app_play_storage))
+		{
+			reg_media_type = 0;
+		}
+
+		__wrn("reg_media_type=%d\n", reg_media_type);
+
+		if(reg_media_type == *init_media_type)
+		{
+			if(EPDK_FALSE == bhas_disk)
+			{
+				goto no_storage;
+			}
+			else
+			{
+				__wrn("no ");
+				goto no_media_file;
+			}
+		}
+		continue;
+	}
+	while(1);
+ok:
+	;
+
+	if(err_code)
+	{
+		if(init_media_type)
+		{
+			*init_media_type = reg_media_type;
+		}
+
+		if(init_storage_type)
+		{
+			*init_storage_type = reg_storage_type;
+		}
+
+		if(app_root_prob_intent_switch_media == intent)
+		{
+			*err_code = app_root_prob_media_switch;
+		}
+		else if(app_root_prob_intent_switch_storage == intent)
+		{
+			*err_code = app_root_prob_storage_switch;
+		}
+		else if(app_root_prob_intent_plugin_for_play == intent)
+		{
+			*err_code = app_root_prob_storage_plugined;
+		}
+		else if(app_root_prob_intent_first_play == intent)
+		{
+			*err_code = app_root_prob_storage_plugined;
+		}
+		else
+		{
+			__wrn("intent type error...\n");
+			*err_code = app_root_prob_ok;
+		}
+	}
+
+	return EPDK_OK;
+no_storage:
+	;
+
+	if(err_code)
+	{
+		*err_code = app_root_prob_no_correspond_storage;
+	}
+
+	return EPDK_FAIL;
+no_media_file:
+	;
+
+	if(err_code)
+	{
+		*err_code = app_root_prob_no_meida_file;
+	}
+
+	return EPDK_FAIL;
+fail:
+	;
+
+	if(err_code)
+	{
+		*err_code = app_root_prob_fail;
+	}
+
+	return EPDK_FAIL;
+}
+
+
+static __s32  app_root_prob_storage_type_for_play(root_ctrl_t *root_ctrl , __s32 *init_media_type , __s32 *init_storage_type
+    , app_root_prob_intent_t intent , app_root_prob_result_t *err_code)
+{
+	reg_root_para_t *para;
+	para = (reg_root_para_t *)dsk_reg_get_para_by_app(REG_APP_ROOT);
+	if(!para)
+	{
+		__wrn("para is null...\n");
+		goto fail;
+	}
+	if(!init_media_type || (*init_media_type < 0 && *init_media_type >= BEETLES_TBL_SIZE(para->last_app_play_storage) ) )
+	{
+		if(app_root_prob_intent_first_play != intent && app_root_prob_intent_plugin_for_play != intent)
+		{
+			goto fail;
+		}
+	}
+	if(!init_storage_type)
+	{
+		if(app_root_prob_intent_first_play != intent)
+		{
+			__msg("storage type is null...\n");
+			goto fail;
+		}
+	}
+	if(intent < 0 || intent >= app_root_prob_intent_max)
+	{
+		__msg("intent type error...\n");
+		goto fail;
+	}
+	/*锟斤拷一锟轿诧拷锟斤拷*/
+	if(app_root_prob_intent_first_play == intent)
+	{
+		if(para->last_play_app < 0 || para->last_play_app >= BEETLES_TBL_SIZE(para->last_app_play_storage))
+		{
+			para->last_play_app = 0;
+		}
+
+		if(init_media_type)
+		{
+			*init_media_type = para->last_play_app;
+		}
+		if(init_storage_type)
+		{
+			*init_storage_type = para->last_app_play_storage[para->last_play_app];
+		}
+	}
+	else if(app_root_prob_intent_switch_media == intent)
+	{
+		__msg("app_root_prob_intent_switch_media\n");
+		switch(*init_media_type)
+		{
+			case m_eMediaTypeList_audio ://锟斤拷频
+			{
+				//music锟窖撅拷锟斤拷锟斤拷
+				if(root_ctrl->h_app_music)
+				{
+				      __msg("music alreadly running\n"); 
+				      goto alreadly_running;
+				}
+				__msg("music not running\n");
+				goto from_nearest_storage;
+				break;
+			}
+
+			case m_eMediaTypeList_video ://锟斤拷频
+			{
+				if(root_ctrl->h_app_movie)
+				{
+					goto alreadly_running;
+				}
+
+				goto from_nearest_storage;
+				break;
+			}
+	  		case m_eMediaTypeList_guoxue:
+	  		case m_eMediaTypeList_shuxue:
+	  		case m_eMediaTypeList_yingyu:
+	  		case m_eMediaTypeList_tangshi:
+	  		case m_eMediaTypeList_donghua:
+	  		case m_eMediaTypeList_erge:
+	  		case m_eMediaTypeList_gushi:
+			{
+				if(root_ctrl->h_app_movie)
+				{
+				      GUI_ManWinDelete(root_ctrl->h_app_movie);
+				      root_ctrl->h_app_movie = 0;
+				     // goto alreadly_running;
+				}
+				goto from_nearest_storage;
+				break;
+
+			      #if 0
+				if(root_ctrl->h_app_movie)
+				{
+					GUI_ManWinDelete(root_ctrl->h_app_movie);
+					root_ctrl->h_app_movie = 0;
+				}
+			      #endif 
+			}
+			case m_eMediaTypeList_photo :
+			{
+				if(root_ctrl->h_app_photo)
+				{
+					__wrn("photo alreadly running\n");
+					goto alreadly_running;
+				}
+
+				__wrn("photo not running\n");
+				goto from_nearest_storage;
+				break;
+			}
+			case m_eMediaTypeList_wechatphoto:
+			{
+				if(root_ctrl->h_app_photo)
+				{
+					__wrn("photo alreadly running\n");
+					goto alreadly_running;
+				}
+
+				__wrn("photo not running\n");
+				goto from_nearest_storage;
+				break;
+			}
+			default:
+			{
+				__wrn("media type error...\n");
+				goto fail;
+				break;
+			}
+		}
+	}
+	else if(app_root_prob_intent_switch_storage == intent)
+	{
+		__wrn("app_root_prob_intent_switch_storage\n");
+
+		switch(*init_media_type)
+		{
+			case m_eMediaTypeList_audio ://锟斤拷频
+			{
+				//music锟斤拷未锟斤拷锟斤拷
+				if(!root_ctrl->h_app_music)
+				{
+					__wrn("music not running\n");
+					goto not_running;
+				}
+
+				__wrn("music is running\n");
+				goto from_next_storage;
+				break;
+			}
+
+			case m_eMediaTypeList_video ://锟斤拷频
+			{
+				//锟斤拷频锟斤拷未锟斤拷锟斤拷
+				if(!root_ctrl->h_app_movie)
+				{
+					__wrn("movie not running\n");
+					goto not_running;
+				}
+
+				__wrn("movie is running\n");
+				goto from_next_storage;
+				break;
+			}
+			case m_eMediaTypeList_photo ://图片
+			{
+				//图片锟斤拷未锟斤拷锟斤拷
+				if(!root_ctrl->h_app_photo)
+				{
+					__wrn("photo not running\n");
+					goto not_running;
+				}
+
+				__wrn("photo is running\n");
+				goto from_next_storage;
+				break;
+			}
+
+			default:
+			{
+				__wrn("media type error...\n");
+				goto fail;
+				break;
+			}
+		}
+	}
+	else if(app_root_prob_intent_plugin_for_play == intent)
+	{
+		__wrn("app_root_prob_intent_plugin_for_play\n");
+		if(!init_storage_type)
+		{
+			__wrn("init_storage_type is null...\n");
+			goto fail;
+		}
+
+		if(*init_storage_type < 0 || *init_storage_type >= BEETLES_TBL_SIZE(para->last_storage_play_app))
+		{
+			__wrn("storage type invalid...\n");
+			goto fail;
+		}
+
+		if(init_media_type)
+		{
+			*init_media_type = para->last_storage_play_app[*init_storage_type];
+		}
+
+		__wrn("get last storage play media, reg media type=%d\n", *init_media_type);
+		goto storage_plugin;
+	}
+	else
+	{
+		__wrn("intent type error...\n");
+		goto fail;
+	}
+
+	__wrn("prob storage type success,*init_media_type=%d, *init_storage_type=%d\n"
+	      , *init_media_type, *init_storage_type);
+	goto ok;
+from_next_storage:
+	;
+	__wrn("app_root_prob_storage_type_for_play: from_next_storage\n");
+
+	if(root_ctrl->switchMediaEnable_flag == 0)
+	{
+		//锟叫伙拷锟教凤拷
+		__s32 ret;
+		HRAT hrat;
+		char path[RAT_MAX_FULL_PATH_LEN];
+		rat_root_t rat_root_type;
+		__s32 to_root_type;
+		rat_media_type_t rat_media_type;
+		__u32 media_cnt;
+
+		if(-1 == para->cur_play_storage
+		    || para->cur_play_storage >= BEETLES_TBL_SIZE(para->last_app_play_storage))
+		{
+			__wrn("para->cur_play_storage error, change to 0...\n");
+			para->cur_play_storage = 0;
+		}
+		//锟斤拷取锟斤拷前锟斤拷锟斤拷锟教凤拷
+		to_root_type = para->cur_play_storage;
+		to_root_type++;
+		if(to_root_type >= BEETLES_TBL_SIZE(para->last_storage_play_app))
+		{
+			to_root_type = 0;
+		}
+		if(to_root_type == para->cur_play_storage)
+		{
+			__wrn("there is only one disk currently, reg root type=%d\n", to_root_type);
+			goto no_storage;
+		}
+		if(init_storage_type)
+		{
+			*init_storage_type = to_root_type;
+		}
+		rat_root_type = app_root_get_rat_root_type(to_root_type);
+		if(RAT_UNKNOWN == rat_root_type)
+		{
+			__wrn("rat_root_type type error...\n");
+			goto no_storage;
+		}
+		rat_media_type = __app_root_get_rat_media_type(*init_media_type);
+		if(RAT_MEDIA_TYPE_UNKNOWN == rat_media_type)
+		{
+			__wrn("rat_media_type type error...\n");
+			goto no_media_file;
+		}
+		eLIBs_memset(path, 0, sizeof(path));
+		ret = app_root_get_search_path(rat_root_type, path);
+		if(EPDK_FAIL == ret)
+		{
+			__wrn("no such reg root type:%d\n", to_root_type);
+			goto no_storage;
+		}
+		{
+		if(init_media_type != NULL && (*init_media_type > m_eMediaTypeList_theater && *init_media_type > m_eMediaTypeList_max))
+		{
+			switch(*init_media_type)
+			{
+				case m_eMediaTypeList_wechatphoto:
+					hrat = rat_open(STRING_WECHAT_PHOTO, RAT_MEDIA_TYPE_PIC, 0);
+					break;
+				default:
+					break;
+			}
+		}
+		else
+		{
+			hrat = rat_open_ex(rat_root_type, rat_media_type, 0);
+		}
+			if(NULL == hrat)
+			{
+				__wrn("no corresponden media file, reg root type=%d\n", to_root_type);
+				goto no_media_file;
+			}
+
+			media_cnt = rat_get_cur_scan_cnt(hrat);
+
+			if(0 == media_cnt)
+			{
+				__wrn("no corresponden media file, reg root type=%d\n", to_root_type);
+				goto no_media_file;
+			}
+
+			if(init_storage_type)
+			{
+				*init_storage_type = to_root_type;
+			}
+
+			__wrn("success to switch reg root to %d, reg media type=%d, media cnt=%d\n"
+			      , to_root_type, *init_media_type, media_cnt);
+		}
+		goto ok;
+	}
+	else
+	{
+		goto ok;
+	}
+from_nearest_storage:
+	;
+	{
+		if(-1 != para->cur_play_storage)//锟斤拷锟斤拷锟角帮拷锟斤拷谭锟斤拷锟斤拷诓锟斤拷锟�
+		{
+			if(init_storage_type)
+			{
+				*init_storage_type = para->cur_play_storage;
+			}
+			goto ok;
+		}
+		else
+		{
+			__wrn("current playing root type is empty...\n");
+
+			if(init_storage_type)
+			{
+				*init_storage_type = para->last_app_play_storage[*init_media_type];
+			}
+			goto ok;
+		}
+	}
+ok:
+	;
+	if(err_code)
+	{
+		*err_code = app_root_prob_ok;
+	}
+	return EPDK_OK;
+storage_plugin:
+	;
+	__wrn("app_root_prob_storage_type_for_play: storage_plugin\n");
+
+	if(err_code)
+	{
+		*err_code = app_root_prob_ok;
+	}
+
+	return EPDK_OK;
+alreadly_running:
+	;
+	__wrn("app_root_prob_storage_type_for_play: alreadly_running\n");
+	if(init_storage_type)
+	{
+		*init_storage_type = para->cur_play_storage;
+	}
+
+	if(err_code)
+	{
+
+		*err_code = app_root_prob_already_running;
+	}
+	return EPDK_FAIL;
+not_running:
+	;
+	__wrn("app_root_prob_storage_type_for_play: not_running\n");
+
+	if(err_code)
+	{
+		*err_code = app_root_prob_not_running;
+	}
+
+	return EPDK_FAIL;
+no_storage:
+	;
+	__wrn("app_root_prob_storage_type_for_play: no_storage\n");
+
+	if(err_code)
+	{
+		*err_code = app_root_prob_no_correspond_storage;
+	}
+
+	return EPDK_FAIL;
+no_media_file:
+	;
+	__wrn("app_root_prob_storage_type_for_play: no_media_file\n");
+
+	if(err_code)
+	{
+		*err_code = app_root_prob_no_meida_file;
+	}
+
+	return EPDK_FAIL;
+fail:
+	;
+	__msg("app_root_prob_storage_type_for_play: fail\n");
+
+	if(err_code)
+	{
+		*err_code = app_root_prob_fail;
+	}
+
+	return EPDK_FAIL;
+}
+
+/*
+** intent :    reg_media_type :    reg_storage_type:锟芥储锟斤拷锟斤拷      bHideHbar:headbar锟斤拷示锟斤拷式
+*/
+static __s32  app_root_shortcut_process(root_ctrl_t *root_ctrl, app_root_prob_intent_t intent, __s32 reg_media_type, __s32 reg_storage_type, __bool bHideHBar, __bool bShowDlgFlag)
+{
+	__s8 ret;
+	__s32 reg_storage_type_bk = reg_storage_type;
+	__s32 reg_media_type_bk   = reg_media_type;
+	rat_root_t rat_root_type;
+	rat_media_type_t rat_media_type;
+	app_root_prob_result_t err_code;	
+	rat_media_type = __app_root_get_rat_media_type(reg_media_type);
+	rat_root_type = app_root_get_rat_root_type(reg_storage_type);
+	if(intent >= app_root_prob_intent_max)
+	{
+		__wrn("intent type error...\n");
+		return EPDK_FAIL;
+	}
+	{
+		//锟斤拷锟斤拷锟斤拷锟斤拷锟饺凤拷锟斤拷锟斤拷锟斤拷锟教凤拷探锟斤拷
+		if(EPDK_OK != app_root_prob_storage_type_for_play(root_ctrl , &reg_media_type , &reg_storage_type , intent , &err_code))
+		{
+		  	return EPDK_FAIL;
+		}
+        //锟教凤拷探锟斤拷锟斤拷预锟斤拷锟斤拷
+        if(app_root_prob_already_running == err_code)
+        {
+        	if(m_eMediaTypeList_audio == reg_media_type)//锟斤拷锟斤拷呛锟教拷锟斤拷郑锟斤拷锟街憋拷踊指锟斤拷锟斤拷锟�
+        	{
+        		if(root_ctrl->h_app_music)
+        		{
+        			musicplayer_mode_e mode;
+        			mode = app_music_get_mode(root_ctrl->h_app_music);
+        			if(-1 == reg_storage_type)//锟斤拷锟斤拷锟揭伙拷锟教斤拷锟斤拷谭锟绞э拷埽锟斤拷锟斤拷取锟斤拷前锟斤拷锟斤拷锟教凤拷
+        			{
+        				__s32 ret;
+        				__u32 rat_root_type;
+        				ret = app_music_get_root_type(root_ctrl->h_app_music, &rat_root_type);
+        				if(EPDK_OK == ret)
+        				{
+        					reg_storage_type = __app_root_get_reg_storage_type2(rat_root_type);
+        				}
+        			}
+        			if(MUSICPLAYER_BACKGROUND == mode || MUSICPLAYER_BACKGROUND_HOME == mode)
+        			{
+        				__wrn("background music is running, reseum it directly...\n");
+        				goto set_play_file;
+        			}
+        		}
+        	}
+        }
+		if(bShowDlgFlag)
+		{
+		  	app_root_show_err_info(root_ctrl , reg_media_type , reg_storage_type , intent , err_code , bHideHBar);
+		}
+		//探锟斤拷晒锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟矫斤拷锟教斤拷锟�
+		ret = app_root_prob_media_file_for_play(root_ctrl , &reg_media_type , &reg_storage_type , intent , &err_code);
+		if(bShowDlgFlag)
+		{
+			app_root_show_err_info(root_ctrl , reg_media_type , reg_storage_type , intent , err_code , bHideHBar);
+
+		}
+		if(EPDK_OK != ret)
+		{
+		  	return EPDK_FAIL;
+		}
+	set_play_file:
+		;
+		if(app_root_prob_intent_switch_storage == intent)
+		{
+			if((reg_storage_type == reg_storage_type_bk) && (reg_media_type == reg_media_type_bk))
+			{
+				return EPDK_FAIL;
+			}
+		}
+		
+		{
+			//探锟斤拷晒锟斤拷锟斤拷锟斤拷貌锟斤拷锟斤拷斜锟�
+			__s32 ret;	
+			if(RAT_MEDIA_TYPE_UNKNOWN == rat_media_type)
+			{
+				__wrn("media type error...\n");
+				return EPDK_FAIL;;
+			}
+
+			if(RAT_UNKNOWN == rat_root_type)
+			{
+
+				__wrn("rat root type error...\n");
+				return EPDK_FAIL;;
+			}
+			if((reg_media_type >= m_eMediaTypeList_guoxue) && (reg_media_type <= m_eMediaTypeList_gushi))
+			{
+
+			  if(EPDK_FAIL == app_root_set_playfile_ex(rat_root_type, rat_media_type, (reg_media_type - m_eMediaTypeList_guoxue)))
+			  {
+			    	return EPDK_FAIL;
+			  }
+			  else
+			  {
+			    /*锟斤拷锟铰伙拷锟剿筹拷路锟斤拷锟斤拷锟斤拷*/
+			    switch(reg_media_type)	
+			    {
+			      case m_eMediaTypeList_guoxue:
+				root_ctrl->root_para->explorer_path = EXPL_BOOT_GUOXUE; 
+				break;
+			      case m_eMediaTypeList_shuxue:
+				root_ctrl->root_para->explorer_path = EXPL_BOOT_SHUXUE; 
+				break;
+			      case m_eMediaTypeList_yingyu:
+				root_ctrl->root_para->explorer_path = EXPL_BOOT_YINGYU; 
+				break;
+			      case m_eMediaTypeList_tangshi:
+				root_ctrl->root_para->explorer_path = EXPL_BOOT_TANGSHI; 
+				break;
+			      case m_eMediaTypeList_donghua:
+				root_ctrl->root_para->explorer_path = EXPL_BOOT_DONGHUA; 
+				break;
+			      case m_eMediaTypeList_erge:
+				root_ctrl->root_para->explorer_path = EXPL_BOOT_ERGE; 
+				break;
+			      case m_eMediaTypeList_gushi:
+				root_ctrl->root_para->explorer_path = EXPL_BOOT_GUSHI; 
+				break;
+			      default:
+				break;
+			    }
+			  }
+			}
+			else if(reg_media_type > m_eMediaTypeList_theater && reg_media_type < m_eMediaTypeList_max)
+			{
+				ret = app_root_set_wechat_playfile(rat_root_type, rat_media_type, reg_media_type);
+			}
+			else
+			{
+				ret = __app_root_set_playfile(rat_root_type, rat_media_type);
+			}
+			if(EPDK_FAIL == ret)
+			{
+				__wrn("set file for play fail...\n");
+				return EPDK_FAIL;;
+			}
+			__wrn("set file for play success...\n");
+		}
+	begin_play:
+		//探锟斤拷晒锟斤拷锟斤拷锟绞硷拷锟斤拷锟�
+		{
+			
+			rat_root_t rat_root_type;
+			rat_root_type = app_root_get_rat_root_type(reg_storage_type);
+			if(RAT_UNKNOWN == rat_root_type)
+			{
+				return EPDK_FAIL;;
+			}
+			switch(reg_media_type)
+			{
+				case m_eMediaTypeList_video :
+				case m_eMediaTypeList_guoxue:
+				case m_eMediaTypeList_shuxue:
+				case m_eMediaTypeList_yingyu:
+				case m_eMediaTypeList_tangshi:
+				case m_eMediaTypeList_donghua:
+				case m_eMediaTypeList_erge:
+				case m_eMediaTypeList_gushi:
+				{
+					__app_root_to_video(root_ctrl, rat_root_type);
+					break;
+				}
+				case m_eMediaTypeList_wechatphoto:
+				{
+					__app_root_to_wechatphoto(root_ctrl, rat_root_type,1);
+				}
+					
+					break;						
+				default :
+					__wrn("reg_media_type type unknown...\n");
+					return EPDK_FAIL;;
+					break;
+			}
+		}
+	}
+	return EPDK_OK;
+}
+
+static __s32  app_root_check_volume_key(__gui_msg_t *msg)
+{
+	root_ctrl_t   *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(!root_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	if(root_ctrl->h_app_setting )
+	{
+		return EPDK_FAIL;
+	}
+	if(KEY_DOWN_ACTION == msg->dwAddData2 || KEY_REPEAT_ACTION == msg->dwAddData2)
+	{
+		switch(msg->dwAddData1)
+		{
+		    case GUI_MSG_KEY_VADD :
+			case GUI_MSG_KEY_LONGVADD :
+			{
+				if(root_ctrl->h_app_movie)
+				{					
+					app_movie_notify_delete_sub_dlg_scene(root_ctrl->h_app_movie);
+				}
+				if(dsk_volume_get() < 30)
+				{
+					
+					dsk_volume_inc();
+				}
+				root_ctrl->h_app_volume = app_root_volume_create(root_ctrl,dsk_volume_get());
+				break;
+			}
+			case GUI_MSG_KEY_VDEC:
+			case GUI_MSG_KEY_LONGVDEC:
+			{
+				if(root_ctrl->h_app_movie)
+				{
+					app_movie_notify_delete_sub_dlg_scene(root_ctrl->h_app_movie);
+				}
+				if(dsk_volume_get() > 0)
+				{
+					dsk_volume_dec();
+				}			
+				root_ctrl->h_app_volume = app_root_volume_create(root_ctrl,dsk_volume_get());
+				break;
+			}
+			default :
+				break;
+		}
+	}
+}
+
+static __s32  app_root_explorer_switch_disk(root_ctrl_t *root_ctrl)
+{
+	if(root_ctrl->h_app_explorer)
+	{
+		__s32 hasDisk = EPDK_FALSE;
+		__u32 rootType;
+
+		if(root_ctrl->root_para->data != ID_EXPLORER_ALL)
+		{
+			if(root_ctrl->root_para->root_type == RAT_TF)
+			{
+				hasDisk = app_root_has_external_disk(APP_ROOT_TYPE_UD);
+				rootType = RAT_USB;
+			}
+			else if(root_ctrl->root_para->root_type == RAT_USB)
+			{
+				hasDisk = app_root_has_external_disk(APP_ROOT_TYPE_SD);
+				rootType = RAT_TF;
+			}
+		}
+
+		if(hasDisk == EPDK_TRUE)
+		{
+			GUI_ManWinDelete(root_ctrl->h_app_explorer);
+			root_ctrl->h_app_explorer = NULL;
+			gscene_hbar_set_state(HBAR_ST_HIDE);
+			root_ctrl->root_para->root_type = rootType;
+			root_ctrl->root_para->explr_root = root_ctrl->root_para->root_type;
+			root_ctrl->h_app_explorer = app_explorer_create(root_ctrl->root_para);
+			GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+			return EPDK_OK;
+		}
+	}
+
+	return EPDK_FAIL;
+}
+/*
+** 锟斤拷锟街硷拷转锟斤拷锟斤拷锟斤拷
+*/
+static __s32  app_root_story_switch(__gui_msg_t* msg)
+{
+	__gui_msg_t key_msg;
+	/*锟斤拷录锟斤拷锟斤拷锟斤拷息锟斤拷锟斤拷*/
+	key_msg.h_deswin = msg->h_deswin;
+	key_msg.h_srcwin = msg->h_srcwin;
+	key_msg.id = msg->id;
+	key_msg.dwAddData1 = msg->dwAddData1;
+	key_msg.dwAddData2 = msg->dwAddData2;
+	key_msg.dwReserved = msg->dwReserved;
+	//if(KEY_UP_ACTION == msg->dwAddData2) 
+	{
+	  switch(msg->dwAddData1) 
+	  {
+	    case GUI_MSG_KEY_YINGYU:
+	      {
+		key_msg.dwAddData1 = GUI_MSG_KEY_NUM1;
+		break;
+	      }
+	    case GUI_MSG_KEY_SHUXUE:
+	      {
+		key_msg.dwAddData1 = GUI_MSG_KEY_NUM2;
+		break;
+	      }
+	    case GUI_MSG_KEY_AUDIO:
+	      {
+		key_msg.dwAddData1 = GUI_MSG_KEY_NUM3;
+		break;
+	      }
+	    case GUI_MSG_KEY_REPEATE:
+              {
+                key_msg.dwAddData1 = GUI_MSG_KEY_NUM4;
+                break;
+              }
+	    case GUI_MSG_KEY_PHOTO:
+              {
+                key_msg.dwAddData1 = GUI_MSG_KEY_NUM5;
+                break;
+              }
+	    case GUI_MSG_KEY_ERGE:
+              {
+                key_msg.dwAddData1 = GUI_MSG_KEY_NUM6;
+                break;
+              }
+	    case GUI_MSG_KEY_TANGSHI:
+              {
+                key_msg.dwAddData1 = GUI_MSG_KEY_NUM7;
+                break;
+              }
+	    case GUI_MSG_KEY_DONGHUA:
+              {
+                key_msg.dwAddData1 = GUI_MSG_KEY_NUM8;
+                break;
+              }
+	    case GUI_MSG_KEY_GUOXUE:
+              {
+                key_msg.dwAddData1 = GUI_MSG_KEY_NUM9;
+                break;
+              }
+	    case GUI_MSG_KEY_GUSHI:
+              {
+                key_msg.dwAddData1 = GUI_MSG_KEY_NUM0;
+                break;
+              }
+	    default:
+	      break;
+	  }
+	  return GUI_ManWinDefaultProc(&key_msg); 
+	}
+}
+static __s32 app_root_set_playfile(rat_root_t rat_root_type, rat_media_type_t rat_media_type)
+{
+	char file_path[RAT_MAX_FULL_PATH_LEN];
+	HRAT hrat = NULL;
+	__u32 total = 0;
+	__u32 last_file_index = 0;
+	char *last_file_path = NULL;
+	reg_root_para_t* para;
+	int ret;
+	rat_entry_t ItemInfo;	
+	if(RAT_UNKNOWN== rat_root_type || RAT_MEDIA_TYPE_UNKNOWN == rat_media_type)
+	{
+		return EPDK_FAIL;
+	}
+	eLIBs_memset(file_path, 0, sizeof(file_path));	
+	ret = app_root_get_search_path(rat_root_type, file_path);
+	if(EPDK_FAIL == ret || eLIBs_strlen(file_path) == 0)	
+	{
+		return EPDK_FAIL;
+	}
+	hrat = rat_open(file_path, rat_media_type, 0);	
+	if(hrat == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	
+	total = rat_get_cur_scan_cnt(hrat);
+	if(total == 0)
+	{
+		return EPDK_FAIL;
+	}
+	
+	para = (reg_root_para_t*)dsk_reg_get_para_by_app(REG_APP_ROOT);
+	if(para == NULL)
+	{
+		return EPDK_FAIL;
+	}
+
+    if(RAT_MEDIA_TYPE_VIDEO == rat_media_type)
+    {
+    	if(rat_root_type == RAT_TF)
+    	{			
+    		last_file_index = para->last_movie_index_sd;
+    		last_file_path = para->last_movie_path_sd;
+    	}
+    	else
+    	{
+    		last_file_index = para->last_movie_index_ud;
+    		last_file_path = para->last_movie_path_ud;	
+    	}
+    }
+    else if(RAT_MEDIA_TYPE_AUDIO == rat_media_type)
+    {
+        if(rat_root_type == RAT_TF)
+    	{			
+    		last_file_index = para->last_music_index_sd;
+    		last_file_path = para->last_music_path_sd;
+    	}
+    	else
+    	{
+    		last_file_index = para->last_music_index_ud;
+    		last_file_path = para->last_music_path_ud;	
+    	}
+    }
+    else if(RAT_MEDIA_TYPE_PIC == rat_media_type)
+    {
+        if(rat_root_type == RAT_TF)
+    	{			
+    		last_file_index = para->last_photo_index_sd;
+    		last_file_path = para->last_photo_path_sd;
+    	}
+    	else
+    	{
+    		last_file_index = para->last_photo_index_ud;
+    		last_file_path = para->last_photo_path_ud;	
+    	}
+    }
+	
+	eLIBs_memset(&ItemInfo,0,sizeof(rat_entry_t));				
+	ret = rat_get_item_info_by_index(hrat, last_file_index, &ItemInfo);	
+	
+	if(ret == EPDK_OK)
+	{
+		eLIBs_memset(file_path, 0, sizeof(file_path));
+		eLIBs_strcpy(file_path, ItemInfo.Path);
+		ret = eLIBs_strcmp(file_path, last_file_path);
+		if(ret == 0)
+		{
+			rat_set_file_for_play(hrat,last_file_path);
+			return EPDK_OK;
+		}
+	}		
+	
+	ret = rat_get_item_info_by_index(hrat, 0, &ItemInfo);	
+	if(ret == EPDK_OK)
+	{
+		eLIBs_memset(file_path, 0, sizeof(file_path));
+		eLIBs_strcpy(file_path, ItemInfo.Path);
+		rat_set_file_for_play(hrat,file_path);
+		return EPDK_OK;
+	}	
+	
+	return EPDK_FAIL;		
+}
+
+static __s32 app_root_set_playfile_ex(rat_root_t rat_root_type, rat_media_type_t rat_media_type, __s32 root_path)
+{
+	char file_path[RAT_MAX_FULL_PATH_LEN];
+	HRAT hrat = NULL;
+	__u32 total = 0;
+	__u32 last_file_index = 0;
+	char *last_file_path = NULL;
+	reg_root_para_t* para;
+	s8 ret;
+	rat_entry_t ItemInfo;
+	u8 str_buff[128], path_buff[128];
+	if(RAT_UNKNOWN== rat_root_type || RAT_MEDIA_TYPE_UNKNOWN == rat_media_type)
+	{
+		return EPDK_FAIL;
+	}
+	eLIBs_memset(file_path, 0, sizeof(file_path));
+ 	ret = app_root_get_search_path(rat_root_type, file_path);
+	get_menu_text(story_dir_path[root_path], str_buff, sizeof(str_buff));
+	eLIBs_strcpy(path_buff, file_path);
+	eLIBs_strcat(path_buff, "\\");
+	eLIBs_strcat(path_buff, str_buff);
+	if(EPDK_FAIL == ret || eLIBs_strlen(path_buff) == 0)	
+	{
+		return EPDK_FAIL;
+	}
+	hrat = rat_open(path_buff, rat_media_type, 0);	
+	if(hrat == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	total = rat_get_cur_scan_cnt(hrat);
+	if(total == 0)
+	{
+		return EPDK_FAIL;
+	}
+	para = (reg_root_para_t*)dsk_reg_get_para_by_app(REG_APP_ROOT);
+	if(para == NULL)
+	{
+		return EPDK_FAIL;
+	}
+
+    if(RAT_MEDIA_TYPE_VIDEO == rat_media_type)
+    {
+    	if(rat_root_type == RAT_TF)
+    	{			
+    		last_file_index = para->last_movie_index_sd;
+    		last_file_path = para->last_movie_path_sd;
+    	}
+    	else
+    	{
+    		last_file_index = para->last_movie_index_ud;
+    		last_file_path = para->last_movie_path_ud;	
+    	}
+    }
+    else if(RAT_MEDIA_TYPE_AUDIO == rat_media_type)
+    {
+        if(rat_root_type == RAT_TF)
+    	{			
+    		last_file_index = para->last_music_index_sd;
+    		last_file_path = para->last_music_path_sd;
+    	}
+    	else
+    	{
+    		last_file_index = para->last_music_index_ud;
+    		last_file_path = para->last_music_path_ud;	
+    	}
+    }
+    else if(RAT_MEDIA_TYPE_PIC == rat_media_type)
+    {
+        if(rat_root_type == RAT_TF)
+    	{			
+    		last_file_index = para->last_photo_index_sd;
+    		last_file_path = para->last_photo_path_sd;
+    	}
+    	else
+    	{
+    		last_file_index = para->last_photo_index_ud;
+    		last_file_path = para->last_photo_path_ud;	
+    	}
+    }
+	
+	eLIBs_memset(&ItemInfo,0,sizeof(rat_entry_t));				
+	ret = rat_get_item_info_by_index(hrat, last_file_index, &ItemInfo);	
+	
+	if(ret == EPDK_OK)
+	{
+		eLIBs_memset(file_path, 0, sizeof(file_path));
+		eLIBs_strcpy(file_path, ItemInfo.Path);
+		ret = eLIBs_strcmp(file_path, last_file_path);
+		if(ret == 0)	
+		{
+			rat_set_file_for_play(hrat,last_file_path);
+			return EPDK_OK;
+		}
+	}		
+	
+	ret = rat_get_item_info_by_index(hrat, 0, &ItemInfo);
+	if(ret == EPDK_OK)
+	{
+		eLIBs_memset(file_path, 0, sizeof(file_path));
+		eLIBs_strcpy(file_path, ItemInfo.Path);
+		rat_set_file_for_play(hrat,file_path);
+		return EPDK_OK;
+	}	
+	return EPDK_FAIL;		
+}
+static __s32 app_root_key(__gui_msg_t *msg)
+{
+	root_ctrl_t *root_ctrl;
+	root_para_t *root_para;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	root_para = root_ctrl->root_para;
+	root_para->root_type = app_root_get_plugstate(msg);	
+	if(NULL == root_ctrl)
+	{
+		__wrn("--invalid para--\n");
+		return EPDK_FAIL;
+	}
+	if((GUI_MSG_KEY_VADD != msg->dwAddData1)&& (GUI_MSG_KEY_LONGVADD != msg->dwAddData1)
+		&& (GUI_MSG_KEY_VDEC != msg->dwAddData1)&& (GUI_MSG_KEY_LONGVDEC != msg->dwAddData1))
+	{
+		app_root_volume_delete(root_ctrl);
+	}
+	if(KEY_UP_ACTION == msg->dwAddData2)
+	{
+		switch(msg->dwAddData1)
+		{
+			case GUI_MSG_KEY_LONGVADD:
+			case GUI_MSG_KEY_LONGVDEC:
+			case GUI_MSG_KEY_VADD:
+			case GUI_MSG_KEY_VDEC:
+			{
+				 return EPDK_OK;
+			}
+			case GUI_MSG_KEY_REPEATE:
+			{
+				esKSRV_SysInfo();
+				break;
+			}
+			default:
+				break;		
+		}
+	}
+	else
+	{		
+		switch(msg->dwAddData1)
+		{
+			case GUI_MSG_KEY_LONGVADD:
+			case GUI_MSG_KEY_LONGVDEC:
+			case GUI_MSG_KEY_VADD:
+			case GUI_MSG_KEY_VDEC:
+			{
+				 app_root_check_volume_key(msg);
+				 return EPDK_OK;
+			}
+			case GUI_MSG_KEY_THEATER:
+			{
+				app_root_to_theater(root_ctrl);
+				return EPDK_OK;
+			}
+			case GUI_MSG_KEY_WECHAT:
+			{
+				
+				__s32 ret;
+				char diskname[RAT_MAX_PARTITION][4] = {0x0};
+				ret = rat_get_partition_name(RAT_SD_CARD, diskname);
+				if(ret || (diskname[0][0] == 0))
+				{
+					app_root_show_dlg(root_ctrl->root_para->h_parent,STRING_ROOT_NULL_DISK,0, 0);
+					return EPDK_FAIL;
+				}
+				app_root_volume_delete(root_ctrl);	
+				if(root_ctrl->h_app_explorer)
+				{
+		  	    	if(exp_play_mode->app_back_exp == exp_wechat)
+		  	    	{
+						char linkName[64] = {0};
+						wifi_get_linkName(linkName);
+					    if(eLIBs_strlen(linkName))
+					    {
+			  	    		if(root_ctrl->h_wechat_send == NULL)
+			  	    		{
+							   root_ctrl->h_wechat_send = photo_wechat_voice_win_create(msg->h_deswin);
+							   GUI_WinSetFocusChild(root_ctrl->h_wechat_send);
+			  	    		}
+						}
+						else
+						{
+							app_root_show_dlg(root_ctrl->root_para->h_parent,STRING_NET_NOT_CONNECTED,0, 0);
+						}
+					   	return EPDK_OK;
+		  	    	}
+				}
+				dsk_orchid_save_last_expl_list(NULL);
+				app_root_delete_all_app(root_ctrl);
+				app_root_cmd2self(root_ctrl, APP_HOME_ID, SWITCH_TO_OTHER_APP, ID_HOME_WECHAT,root_para->root_type);	
+				return EPDK_OK;
+			}
+			case GUI_MSG_KEY_PHOTO:
+			{
+				
+				if(RAT_UNKNOWN == root_para->root_type)
+				{
+					app_root_show_dlg(root_ctrl->root_para->h_parent,STRING_ROOT_NULL_DISK,0, 0);
+					return EPDK_FAIL;
+				}
+				if(app_root_set_playfile(root_para->root_type, RAT_MEDIA_TYPE_PIC))  
+				{
+					return;
+				}
+				if(root_ctrl->h_app_photo)
+				{
+					return EPDK_OK;
+				}
+				dsk_orchid_save_last_expl_list(NULL);
+				app_root_delete_all_app(root_ctrl);
+				app_root_cmd2self(root_ctrl, APP_HOME_ID, SWITCH_TO_OTHER_APP, ID_PHOTO_SHORTCUT, root_para->root_type);	
+				break;
+			} 
+			case GUI_MSG_KEY_AUDIO:
+			{
+				if(RAT_UNKNOWN == root_para->root_type)
+				{
+					app_root_show_dlg(root_ctrl->root_para->h_parent,STRING_ROOT_NULL_DISK,0, 0);
+					return EPDK_FAIL;
+				}
+				if(root_ctrl->h_app_music)
+				{
+					return EPDK_OK;
+				}
+				app_root_delete_all_app(root_ctrl);
+				app_root_cmd2self(root_ctrl, APP_HOME_ID, SWITCH_TO_OTHER_APP, ID_MUSIC_SHORTCUT, root_para->root_type);	
+				break;
+			}
+			case GUI_MSG_KEY_KARAOKE:
+			{
+				if(root_ctrl->h_app_karaok)
+				{
+					return EPDK_OK;
+				}
+				
+				{
+					__s32 ret = 0;
+					char diskname[RAT_MAX_PARTITION][4] = {0x0};
+					ret = rat_get_partition_name(RAT_SD_CARD, diskname);
+					if(ret || (diskname[0][0] == 0))
+					{
+						app_root_show_dlg(root_ctrl->root_para->h_parent,STRING_ROOT_INSERT_SD,0, 0);
+						return EPDK_FAIL;
+					}
+				}
+				
+				root_para->root_type = RAT_TF;
+				if(app_root_set_playfile_ex(root_para->root_type,RAT_MEDIA_TYPE_VIDEO,EXPL_BOOT_KALAOK))//if(app_root_set_playfile_ex(root_para->root_type,RAT_MEDIA_TYPE_VIDEO,EXPL_BOOT_KALAOK))
+				{					
+					return EPDK_OK;		
+				}	
+				root_para->explorer_path = EXPL_BOOT_KALAOK; 
+				gscene_hbar_set_text(root_para->explorer_path);
+				app_root_delete_all_app(root_ctrl);
+				app_root_cmd2self(root_ctrl, APP_HOME_ID, SWITCH_TO_OTHER_APP, ID_KARAOK_SHORTCUT, root_para->root_type);
+				break;
+			}
+			case GUI_MSG_KEY_NET_PLAY:
+			{
+				if(wifi_link_det(NULL) == 0)
+				{						
+					app_root_show_dlg(root_ctrl->root_para->h_parent,STRING_NET_NOT_CONNECTED,0, 0);
+					break;
+				}				
+				app_root_cmd2self(root_ctrl, APP_HOME_ID, SWITCH_TO_OTHER_APP, ID_HOME_WIFI_PLAY, root_para->root_type);
+			}
+			default:
+				break;
+		}
+	}		
+}
+
+__s32  app_tips_show(H_LYR lyrwin, __s32 str_id)
+{
+	char					string[128];
+	GUI_RECT			gui_rect;
+	RECT					rect;
+	int						i;
+	H_LYR					hlyrTmp = NULL;
+	__msg("app_tips_show: 0x%X\n", str_id);
+	dsk_langres_get_menu_text(str_id, string, sizeof(string));
+	if(!lyrwin)
+	{
+		rect.width = _W_SCR_ /3;
+		rect.height = _H_SCR_ /3;
+		rect.x = (_W_SCR_ -rect.width) /2;
+		rect.y = (_H_SCR_ -rect.height) /2;
+		hlyrTmp = app_root_layer_create(rect,1);
+		lyrwin = hlyrTmp;
+	}
+	else
+	{
+		GUI_LyrWinGetScnWindow(lyrwin, &rect);
+	}
+	__msg("lyrwin=0x%X\n", lyrwin);
+	gui_rect.x0 = 0;
+	gui_rect.y0 = 0;
+	gui_rect.x1 = gui_rect.x0 +rect.width -1;
+	gui_rect.y1 = gui_rect.y0 +rect.height -1;
+	GUI_LyrWinSel(lyrwin);
+	GUI_SetFont(SWFFont);
+	GUI_UC_SetEncodeUTF8();
+	GUI_SetDrawMode(GUI_DRAWMODE_NORMAL);
+	GUI_SetBkColor(_ARGB(0xFF, 30, 30, 30)); 
+	GUI_SetColor(_ARGB(0xFF, 0xFF, 0xFF, 0xFF));
+	GUI_ClearRectEx(&gui_rect);
+	for(i = 0; i < 3; i++)
+	{
+		GUI_DrawRectEx(&gui_rect);
+		gui_rect.x0 += 2;
+		gui_rect.y0 += 2;
+		gui_rect.x1 -= 2;
+		gui_rect.y1 -= 2;
+	}
+	//karaoke_set_char_encode(karaoke_get_char_GBK_encode());
+	GUI_DispStringInRectWrap(string, &gui_rect, GUI_TA_VCENTER | GUI_TA_HCENTER, GUI_WRAPMODE_WORD);
+	GUI_LyrWinSetSta(lyrwin,GUI_LYRWIN_STA_ON);
+	GUI_LyrWinSetTop(lyrwin);
+	__msg("string:\"%s\",\n\tgui_rect:(%d,%d),(%d,%d)\n", string, gui_rect.x0,gui_rect.y0,gui_rect.x1,gui_rect.y1);
+	if(hlyrTmp)
+	{
+		esKRNL_TimeDly(150);
+		GUI_LyrWinDelete(hlyrTmp);
+	}
+	return EPDK_OK;	
+}
+
+__s32 app_root_wechat_exit(__gui_msg_t *msg)
+{
+	root_para_t *root_para;
+	root_ctrl_t *root_ctrl;
+	__gui_msg_t wechat_msg_t;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	root_para = root_ctrl->root_para;
+	root_para->root_type = app_root_get_plugstate(msg);	
+	if(root_ctrl->hWinFrm_wechatText)
+	{
+		app_wechat_destroy(root_ctrl->hWinFrm_wechatText);
+		root_ctrl->hWinFrm_wechatText = NULL;
+		app_root_process_after_show_dlg(root_ctrl);
+		exp_play_mode->delete_wechat_text = 0;
+		return EPDK_OK;
+	}
+	if((root_ctrl->bbc_download_info.t > BBC_CONTENT_TEXT) && (root_ctrl->bbc_download_info.t < BBC_CONTENT_TICKET) 
+	   && (msg->id == GUI_MSG_KEY) && (msg->dwAddData1 == GUI_MSG_KEY_ENTER) && (msg->dwAddData2 == KEY_UP_ACTION))
+	{
+		gscene_hbar_set_state(HBAR_ST_HIDE);
+		switch(root_ctrl->bbc_download_info.t)
+		{
+			case BBC_CONTENT_VOICE:
+			{
+			#if 0  //目前只锟杰匡拷一锟斤拷锟斤拷息
+				if(exp_play_mode->wxp_wechat_msg > 0)
+					exp_play_mode->wxp_wechat_msg--;
+				else
+					exp_play_mode->wxp_wechat_msg = 0;
+			#else
+				exp_play_mode->wxp_wechat_msg = 0;
+			#endif
+				wechat_set_messge_num(exp_play_mode->wxp_wechat_msg);
+				app_root_cover_rename(wxp_file_path, wxp_file_path, ROOT_SW_TO_VOICE);
+				esKRNL_TimeDly(50);
+				app_root_set_new_msg_wechat_playfile(m_eMediaTypeList_wechatvoice);
+				if(wechat_msg_t.h_deswin = GUI_WinGetHandFromName("cover photolbr win"))
+				{
+					gscene_hbar_set_state(HBAR_ST_SHOW);
+					wechat_msg_t.h_srcwin = NULL;
+					wechat_msg_t.id = MSG_WECHAT_MSG;
+					wechat_msg_t.dwAddData1 = GUI_MSG_WECHAT_VOICE;
+					wechat_msg_t.dwAddData2 = 0;
+					wechat_msg_t.dwReserved = 0;
+					GUI_SendNotifyMessage(&wechat_msg_t);
+				}
+				else
+				{
+					app_root_delete_all_app(root_ctrl);
+				  	__app_root_to_wechatvoice(root_ctrl, root_para->root_type, 0);
+				}
+				root_ctrl->bbc_download_info.t = BBC_CONTENT_NONE;
+				return EPDK_OK;
+			}
+			case BBC_CONTENT_IMAGE:
+			{
+			#if 0  //目前只锟杰匡拷一锟斤拷锟斤拷息
+				if(exp_play_mode->wxp_wechat_msg > 0)
+					exp_play_mode->wxp_wechat_msg--;
+				else
+					exp_play_mode->wxp_wechat_msg = 0;
+			#else
+				exp_play_mode->wxp_wechat_msg = 0;
+			#endif
+				wechat_set_messge_num(exp_play_mode->wxp_wechat_msg);
+				eDbug("APP_ROOT: exp_play_mode->wxp_wechat_msg = %d\n", exp_play_mode->wxp_wechat_msg);
+				app_root_cover_rename(wxp_file_path, wxp_file_path, ROOT_SW_TO_PHOTO);
+				esKRNL_TimeDly(50);
+				app_root_set_new_msg_wechat_playfile(m_eMediaTypeList_wechatphoto);
+				if(root_ctrl->h_app_photo)
+				{
+					if(wechat_msg_t.h_deswin = GUI_WinGetHandFromName("photo spsc win"))
+					{
+						wechat_msg_t.h_srcwin = NULL;
+						wechat_msg_t.id = MSG_WECHAT_MSG;
+						wechat_msg_t.dwAddData1 = GUI_MSG_WECHAT_PHOTO;
+						wechat_msg_t.dwAddData2 = 0;
+						wechat_msg_t.dwReserved = 0;
+						GUI_SendNotifyMessage(&wechat_msg_t);
+					}
+				}
+				else
+				{
+					app_root_delete_all_app(root_ctrl);
+					__app_root_to_wechatphoto(root_ctrl, root_para->root_type,0);					
+				}
+				root_ctrl->bbc_download_info.t = BBC_CONTENT_NONE;
+				return EPDK_OK;
+			}
+			case BBC_CONTENT_VIDEO:
+			{
+			#if 0  //目前只锟杰匡拷一锟斤拷锟斤拷息
+				if(exp_play_mode->wxp_wechat_msg > 0)
+					exp_play_mode->wxp_wechat_msg--;
+				else
+					exp_play_mode->wxp_wechat_msg = 0;
+			#else
+				exp_play_mode->wxp_wechat_msg = 0;
+			#endif
+				wechat_set_messge_num(exp_play_mode->wxp_wechat_msg);
+				app_root_cover_rename(wxp_file_path, wxp_file_path, ROOT_SW_TO_MOVIE);
+				esKRNL_TimeDly(50);
+				app_root_set_new_msg_wechat_playfile(m_eMediaTypeList_wechatvideo);
+				exp_play_mode->play_state = EXPLOROER_SW_TO_MOVIE;
+				if(root_ctrl->h_app_movie)
+				{
+					if(wechat_msg_t.h_deswin = root_ctrl->h_app_movie)
+					{
+						root_para->explorer_path = EXPL_BOOT_RESET;
+						wechat_msg_t.h_srcwin = NULL;
+						wechat_msg_t.id = MSG_WECHAT_MSG;
+						wechat_msg_t.dwAddData1 = GUI_MSG_WECHAT_VIDEO;
+						wechat_msg_t.dwAddData2 = 0;
+						wechat_msg_t.dwReserved = 0;
+						GUI_SendNotifyMessage(&wechat_msg_t);
+					}
+				}
+				else
+				{
+					app_root_delete_all_app(root_ctrl);
+					__app_root_to_wechatvideo(root_ctrl, root_ctrl->root_para->root_type, 0);
+				}	
+				root_ctrl->bbc_download_info.t = BBC_CONTENT_NONE;
+				return EPDK_OK;
+			}
+			default:
+				app_root_process_after_show_dlg(root_ctrl);
+				break;
+		}
+	}
+	else
+	{
+		return EPDK_FAIL;
+	}	
+	return EPDK_FAIL;
+}
+
+/*
+** data :锟斤拷锟街伙拷锟接帮拷锟斤拷锟�  explorer_path:锟斤拷锟铰伙拷锟斤拷锟斤拷目录
+*/
+static __s32 app_root_story(__gui_msg_t* msg, __u8 data, __u8 explorer_path)
+{
+	root_para_t *root_para;
+	root_ctrl_t *root_ctrl;
+	__s32	ret = 0;
+	char diskname[RAT_MAX_PARTITION][4] = {0x0};
+	root_ctrl = (root_ctrl_t   *)GUI_WinGetAddData(msg->h_deswin);
+	root_para = root_ctrl->root_para;
+	root_para->root_type 		= app_root_get_plugstate(msg);
+	root_para->data 	    	= data;
+	root_para->explorer_path  = explorer_path;
+	if(RAT_UNKNOWN == root_para->root_type)
+	{
+		app_root_show_dlg(root_ctrl->root_para->h_parent,STRING_ROOT_NULL_DISK,0, 0);	
+		if(explorer_path == EXPL_BOOT_KALAOK)
+		{
+			app_home_restore(msg);
+			return EPDK_FAIL;
+		}
+	}
+	ret = rat_get_partition_name(RAT_SD_CARD, diskname);
+	if(ret || (diskname[0][0] == 0))
+	{
+		app_root_show_dlg(root_ctrl->root_para->h_parent,STRING_ROOT_INSERT_SD,0, 0);
+		app_home_restore(msg);
+		return EPDK_FAIL;
+	}
+	root_para->root_type = RAT_TF;
+	root_ctrl->root_para->h_parent= GUI_WinGetParent(root_ctrl->h_app_home);
+	dsk_orchid_save_last_expl_list(NULL);
+    if(explorer_path == EXPL_BOOT_KALAOK)
+    {
+  		if(app_root_set_playfile_ex(root_para->root_type,RAT_MEDIA_TYPE_VIDEO,EXPL_BOOT_KALAOK))
+  		{
+  			app_root_show_dlg_no_file(root_ctrl->root_para->h_parent, 0);
+  			app_home_restore(msg);
+  			return EPDK_OK;		
+  		}
+    }
+    else
+    {
+  		if(app_root_check_mediafile_exist(root_para->root_type, RAT_MEDIA_TYPE_VIDEO))  
+  		{
+  			app_root_show_dlg_no_file(root_ctrl->root_para->h_parent, 0);
+  			rat_clear_all_list();
+  			app_home_restore(msg);
+  			 return EPDK_OK;
+  		}
+    }
+	app_root_delete_all_app(root_ctrl);
+	root_ctrl->h_app_explorer = app_explorer_create(root_para);
+	GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+	return EPDK_OK;
+}
+static __s32 app_root_root_id(__gui_msg_t* msg)
+{
+	root_para_t *root_para;
+	root_ctrl_t   *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(root_ctrl == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	root_para = root_ctrl->root_para;
+	switch(HIWORD(msg->dwAddData1))
+	{
+		case m_eOnPaintIdx_tipsDelete:
+		{
+			if(show_tips_layer)
+			{
+				esKRNL_TimeDly(150);
+				GUI_LyrWinDelete(show_tips_layer);
+				show_tips_layer = NULL;
+				gscene_hbar_set_state(HBAR_ST_SHOW);
+			}
+			break;
+		}
+		case m_eOnPaintIdx_tipsLinking:
+		{
+			if(show_tips_layer)
+			{
+				GUI_LyrWinDelete(show_tips_layer);
+				show_tips_layer = NULL;
+			}
+			{
+				RECT rect;
+				rect.width = _W_SCR_ / 3;
+				rect.height = _H_SCR_ / 3;
+				rect.x = (_W_SCR_ - rect.width) / 2;
+				rect.y = (_H_SCR_ - rect.height) / 2;
+				show_tips_layer = app_root_layer_create(rect, 1); //锟斤拷锟斤拷墓锟斤拷锟斤拷校锟揭恢憋拷锟绞撅拷锟�
+			}
+
+			if(show_tips_layer)
+			{
+				gscene_hbar_set_state(HBAR_ST_HIDE);
+				app_tips_show(show_tips_layer, STRING_NET_LINK);
+			}
+
+			break;
+		}
+		case m_eOnPaintIdx_tipsLinkOk:
+		{
+			if(show_tips_layer)
+			{
+				app_tips_show(show_tips_layer, STRING_NET_LINK_OK);
+			}
+			break;
+		}
+		case m_eOnPaintIdx_tipsLinkFail:
+		{
+			if(show_tips_layer)
+			{
+				app_tips_show(show_tips_layer, STRING_NET_LINK_FAIL);
+			}
+			break;
+		}
+		case m_eOnPaintIdx_weChatText:
+		case m_eOnPaintIdx_bbcOta:
+		case m_eOnPaintIdx_weChatPhoto:
+		case m_eOnPaintIdx_weChatVideo:	
+		case m_eOnPaintIdx_weChatVoice:
+		{
+			wechat_data = HIWORD(msg->dwAddData1);
+			eLIBs_memcpy(&root_ctrl->bbc_download_info,(bbc_download_info_t*)(msg->dwAddData2),sizeof(root_ctrl->bbc_download_info));
+			break;
+		}
+		case m_eOnPaintIdx_weChatText_del:
+		{
+			if(root_ctrl->hWinFrm_wechatText)
+			{
+				app_wechat_destroy(root_ctrl->hWinFrm_wechatText);
+				root_ctrl->hWinFrm_wechatText = NULL;
+				app_root_process_after_show_dlg(root_ctrl);
+				exp_play_mode->delete_wechat_text = 0;
+			}
+			break;
+		}
+		default:
+			break;
+}
+	return EPDK_OK;
+}
+static __s32 app_root_home_id(__gui_msg_t* msg)
+{
+	root_para_t *root_para;
+	root_ctrl_t *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(root_ctrl == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	root_para = root_ctrl->root_para;
+	root_para->root_type = app_root_get_plugstate(msg);
+	if(RAT_UNKNOWN == root_para->root_type)
+	{
+		app_root_show_dlg(root_ctrl->root_para->h_parent,STRING_ROOT_NULL_DISK,0, 0);
+		return EPDK_FAIL;
+	}
+	switch(HIWORD(msg->dwAddData1))
+	{
+		case SWITCH_TO_OTHER_APP:
+		{
+			switch(msg->dwAddData2)
+			{
+				case ID_HOME_TIME_WEATHER:
+				{  
+					if(wifi_link_det(NULL) == 0)
+					{
+						app_root_show_dlg(root_ctrl->root_para->h_parent,STRING_NET_NOT_CONNECTED,0, 0);
+						app_home_restore_ex(root_ctrl);
+						return EPDK_FAIL;
+					}
+					gscene_hbar_set_state(HBAR_ST_HIDE);
+					root_ctrl->root_para->h_parent= GUI_WinGetParent(root_ctrl->h_app_home);		
+					app_root_delete_all_app(root_ctrl);
+					root_ctrl->h_app_weather=  app_weather_create(root_para);
+					if(root_ctrl->h_app_weather == NULL)
+					{
+						app_home_restore(msg);
+					}
+					else
+					{
+						GUI_WinSetFocusChild(root_ctrl->h_app_weather);
+					}
+					break;
+				}		  
+				case ID_HOME_WIFI_PLAY:
+				{	
+					if(wifi_link_det(NULL) == 0)
+					{						
+						app_root_show_dlg(root_ctrl->root_para->h_parent,STRING_NET_NOT_CONNECTED,0, 0);
+						app_home_restore_ex(root_ctrl);
+						return EPDK_FAIL;
+					}
+					if(root_ctrl->h_app_net_explorer)
+					{
+						return EPDK_FAIL;
+					}
+					if(msg->dwReserved)
+					{
+						root_para->wifi_cat_id = msg->dwReserved;
+					}
+					app_root_delete_all_app(root_ctrl);
+					if(root_ctrl->h_app_net_explorer == NULL)
+					{
+						root_ctrl->h_app_net_explorer =  net_explorer_create(root_para);
+					}
+					if(root_ctrl->h_app_net_explorer)
+					{
+						GUI_WinSetFocusChild(root_ctrl->h_app_net_explorer);
+					}
+					else
+					{
+						gscene_hbar_set_state(HBAR_ST_SHOW);
+						app_home_restore(msg);
+					}
+					break;
+				}
+				case ID_HOME_WECHAT:
+				{
+					__s32 ret;
+					char diskname[RAT_MAX_PARTITION][4] = {0x0};
+					ret = rat_get_partition_name(RAT_SD_CARD, diskname);
+					if(ret || (diskname[0][0] == 0))
+					{
+						app_root_show_dlg(root_ctrl->root_para->h_parent,STRING_ROOT_INSERT_SD,0, 0);
+						app_home_restore(msg);
+						return EPDK_FAIL;
+					}
+					if(root_ctrl->h_app_explorer)
+					{
+						return EPDK_FAIL;
+					}
+					gscene_hbar_set_state(HBAR_ST_HIDE);
+					app_root_delete_all_app(root_ctrl);
+					root_para->data 	    = ID_EXPLORER_PHOTO;
+					root_para->explorer_path = EXPL_BOOT_WECHAT;
+					if(root_ctrl->h_app_explorer == NULL)
+					{
+					  	root_ctrl->h_app_explorer = app_explorer_create(root_para);
+						if(root_ctrl->h_app_explorer)
+						{
+							GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+						}
+						else
+						{
+							app_home_restore(msg);
+						}
+						
+					}
+					break;
+				}
+				case ID_HOME_NATIVE:
+				{
+					__s32 ret = 0;
+					char diskname[RAT_MAX_PARTITION][4] = {0x0};
+					ret = rat_get_partition_name(RAT_SD_CARD, diskname);
+					if(ret || (diskname[0][0] == 0))
+					{
+						app_root_show_dlg(root_ctrl->root_para->h_parent,STRING_ROOT_INSERT_SD,0, 0);
+						app_home_restore(msg);
+						return EPDK_FAIL;
+					}
+					app_root_delete_all_app(root_ctrl);
+					root_para->data = ID_EXPLORER_MOVIE;
+					ret = app_native_app_explorer_create(root_para);		
+					if(EPDK_FAIL == ret)
+					{
+						__msg("create explorer fail , home restore\n") ;
+						app_home_restore(msg);
+					}
+					else
+					{
+						root_ctrl->h_app_explorer = ret;
+						GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+					}
+					break;
+				}
+				case ID_POINT_READ:
+				{
+					__s32 ret = 0 ;
+					char diskname[RAT_MAX_PARTITION][4] = {0x0};					
+					if(RAT_UNKNOWN == root_para->root_type)
+					{
+						app_root_show_dlg(root_ctrl->root_para->h_parent,STRING_ROOT_NULL_DISK,0, 0);
+						app_home_restore(msg);
+						return EPDK_FAIL;
+					}
+					ret = rat_get_partition_name(RAT_SD_CARD, diskname);
+					if(ret || (diskname[0][0] == 0))
+					{
+						app_root_show_dlg(root_ctrl->root_para->h_parent,STRING_ROOT_INSERT_SD,0, 0);
+						app_home_restore(msg);
+						return EPDK_FAIL;
+					}
+					app_root_delete_all_app(root_ctrl);
+					root_para->data = RAT_MEDIA_TYPE_POINT_READ;
+					root_para->explorer_path = EXPL_BOOT_POINT_READ;
+					ret =  pread_app_explorer_create(root_para);
+					if(NULL == ret)
+					{
+						app_home_restore(msg);
+					}
+					else
+					{
+						root_ctrl->h_app_explorer = ret ;
+						GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+					}
+					break;
+				}
+				case ID_HOME_KARAOKE:
+				{
+				    app_root_story(msg,ID_EXPLORER_MOVIE,EXPL_BOOT_KALAOK);
+				    break;
+				}
+				case ID_HOME_EXPLORER:
+				{
+					app_root_delete_all_app(root_ctrl);
+					gscene_hbar_set_state(HBAR_ST_HIDE);	
+					root_para->explorer_path = EXPLORER_BOOT_U_DISK;
+					root_para->data = ID_EXPLORER_ALL;
+					if(root_ctrl->h_app_explorer == NULL)
+					root_ctrl->h_app_explorer =  app_explorer_create(root_para);
+					if(root_ctrl->h_app_explorer)
+					{
+						GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+					}
+					else
+					{
+						app_home_restore(msg);
+					}
+					break;
+				}
+				case ID_HOME_MOVIE:
+				{
+					root_para->data = ID_EXPLORER_MOVIE;
+					if(app_root_check_mediafile_exist(root_para->root_type, RAT_MEDIA_TYPE_VIDEO))  
+					{
+						app_root_show_dlg_no_file(root_ctrl->root_para->h_parent, 0);
+						rat_clear_all_list();
+						app_home_restore(msg);
+						return EPDK_OK;
+					}
+					app_root_delete_all_app(root_ctrl);
+					root_ctrl->h_app_explorer =  app_explorer_create(root_para);
+					if(root_ctrl->h_app_explorer)
+					{
+						GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+					}
+					else
+					{
+						app_home_restore(msg);
+					}
+					
+					break;
+				}
+				case ID_MOVIE_SHORTCUT:
+				{
+					app_root_delete_all_app(root_ctrl);
+					root_para->data    = 0;
+					root_para->tv_mode = MOVIE_MODE_NORMAL;
+					root_ctrl->h_app_movie = app_movie_create(root_para);
+					if(root_ctrl->h_app_movie)
+					{
+						GUI_WinSetFocusChild(root_ctrl->h_app_movie);
+					}
+					else
+					{
+						app_home_restore(msg);
+					}
+					break;
+				}
+				case ID_KARAOK_SHORTCUT:
+				{
+					app_root_delete_all_app(root_ctrl);
+					root_para->tv_mode = MOVIE_MODE_NORMAL;
+					root_para->data    = 0;
+					root_ctrl->h_app_karaok = app_karaok_create(root_para);
+					if(root_ctrl->h_app_karaok)
+					{
+						GUI_WinSetFocusChild(root_ctrl->h_app_karaok);
+					}
+					else 
+					{
+						app_home_restore(msg);
+					}
+					
+					break;
+				}
+				case ID_HOME_PHOTO:
+				{
+					if(app_root_check_mediafile_exist(root_para->root_type, RAT_MEDIA_TYPE_PIC))  
+					{
+						app_root_show_dlg_no_file(root_ctrl->root_para->h_parent, 0);
+						rat_clear_all_list();
+						app_home_restore(msg);
+						return EPDK_OK;
+					}
+					gscene_hbar_set_state(HBAR_ST_HIDE);
+					root_para->data = ID_EXPLORER_PHOTO;
+					app_root_delete_all_app(root_ctrl);
+					root_ctrl->h_app_explorer =  native_app_explorer_create(root_para);
+					if(root_ctrl->h_app_explorer)
+					{
+						GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+					}
+					else
+					{
+						app_home_restore(msg);
+					}
+					break;
+				}
+				case ID_PHOTO_SHORTCUT:
+				{
+					gscene_hbar_set_state(HBAR_ST_HIDE);
+					app_root_delete_all_app(root_ctrl);
+					app_root_set_bgmusic_mode(msg);
+					app_root_play_app_sounds(SHORT_KEY_WAVE_FILE_PHOTO);
+					root_para->photo_enter_mode = HIWORD(msg->dwReserved);  //0  锟斤拷锟斤拷图片模式  1 微锟斤拷图片模式
+					root_para->explorer_path = EXPL_BOOT_RESET;
+					root_para->data = 0;
+					root_ctrl->h_app_photo = app_photo_create(root_para);
+					if(root_ctrl->h_app_photo)
+					{
+						GUI_WinSetFocusChild(root_ctrl->h_app_photo);
+					}
+					else
+					{
+						app_home_restore(msg);
+					}
+					break;
+				}
+				case ID_HOME_MUSIC:
+				case ID_MUSIC_SHORTCUT:
+				{
+					__s32 ret;
+					__s32 exist;
+					H_WIN hmusic;
+					gscene_hbar_set_state(HBAR_ST_HIDE);
+					root_para->explorer_play_music = 0;
+					root_para->data = MUSICPLAYER_NORMAL;
+					root_para->Option = 0;
+					exist = app_root_bgmusic_exist(msg, &hmusic);
+					if(1 == exist)//锟截斤拷锟斤拷台锟斤拷锟斤拷
+					{
+						ret = app_music_get_root_type(hmusic, &root_para->root_type);
+						if(EPDK_FAIL == ret)
+						{
+							root_para->root_type = RAT_TF;
+						}
+						ret = app_music_restore(hmusic, root_para);
+						if(EPDK_OK == ret)
+						{
+							if(root_ctrl->h_app_music != hmusic)
+							{
+							}
+							root_ctrl->h_app_music = hmusic;
+						}
+						else
+						{
+							app_root_bgmusic_delete(msg);
+							root_ctrl->h_app_music =  app_music_create(root_para);
+							if(root_ctrl->h_app_music)
+							{
+								GUI_WinSetFocusChild(root_ctrl->h_app_music);
+							}
+							else
+							{
+								app_home_restore(msg);
+							}
+						}
+					}
+					else
+					{
+						root_ctrl->h_app_music =  app_music_create(root_para);
+						if(root_ctrl->h_app_music)
+						{
+							GUI_WinSetFocusChild(root_ctrl->h_app_music);
+						}
+						else
+						{
+							app_home_restore(msg);
+						}
+					}
+					break;
+				}
+				case ID_HOME_ALARM:
+				{
+					root_ctrl->root_para->setting_opt = SETTING_ALARM;//锟斤拷锟斤拷
+					root_ctrl->h_app_setting =  app_setting_create(root_para);
+					if(root_ctrl->h_app_setting)
+					{
+						GUI_WinSetFocusChild(root_ctrl->h_app_setting);
+					}
+					else
+					{
+						app_home_restore(msg);
+					}
+					break;
+				}
+				case ID_HOME_OTHERS:
+				{
+					gscene_hbar_set_state(HBAR_ST_HIDE);
+					if(root_ctrl->h_app_explorer)
+					{
+						GUI_ManWinDelete(root_ctrl->h_app_explorer);
+						root_ctrl->h_app_explorer = 0;
+					}
+					app_root_delete_all_app(root_ctrl);
+					if(0 == msg->dwReserved)
+					{
+						root_ctrl->root_para->setting_opt = 0;//通锟斤拷锟斤拷锟斤拷
+						root_ctrl->h_app_setting =  app_setting_create(root_para);
+						if(root_ctrl->h_app_setting)
+						{
+							GUI_WinSetFocusChild(root_ctrl->h_app_setting);
+						}
+						else
+						{
+							app_home_restore(msg);
+						}
+						break;
+					}
+					else if(1 == msg->dwReserved)
+					{
+						root_ctrl->root_para->setting_opt = 1;//锟斤拷源锟斤拷锟斤拷
+						root_ctrl->h_app_setting =  app_setting_create(root_para);
+						if(root_ctrl->h_app_setting)
+						{
+							GUI_WinSetFocusChild(root_ctrl->h_app_setting);
+						}
+						else
+						{
+							app_home_restore(msg);
+						}
+						break;
+					}
+					else if(2 == msg->dwReserved)
+					{
+						gscene_hbar_set_state(HBAR_ST_HIDE);
+						root_para->root_type = RAT_TF;
+						root_para->explr_root = RAT_TF;
+						root_para->data = ID_EXPLORER_ALL;
+						root_ctrl->h_app_explorer =  app_explorer_create(root_para);
+						if(root_ctrl->h_app_explorer)
+						{
+							GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+						}
+						else
+						{
+							app_home_restore(msg);
+						}
+						break;
+					}
+					else
+					{
+						__err("sub menu focus item invalid...\n");
+						break;
+					}
+					break;
+				}		
+				case ID_WECHAT_VOICE: 
+				{
+					__s32 ret = 0 ;
+					char diskname[RAT_MAX_PARTITION][4] = {0x0};
+					if(root_ctrl->h_app_photo)
+					{
+						GUI_ManWinDelete(root_ctrl->h_app_photo);
+						root_ctrl->h_app_photo = 0;
+					}
+					
+					root_para->explorer_path = EXPL_BOOT_WECHAT;
+					root_para->data = ID_EXPLORER_PHOTO;
+					exp_play_mode->play_state = EXPLOROER_SW_TO_VOICE;
+					root_para->voice_enter_mode = 1; 
+					ret =  app_explorer_create(root_para);
+					root_para->photo_enter_mode = 0;
+					if(NULL == ret)
+					{
+						__msg("create explorer fail , home restore\n") ;
+						app_home_restore(msg);
+					}
+					else
+					{
+						root_ctrl->h_app_explorer = ret ;
+						GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+					}
+					break;
+				}
+				case ID_WECHAT_VIDEO: //锟斤拷锟斤拷微锟斤拷锟斤拷频
+				{
+					__s32 ret = 0 ;
+					char diskname[RAT_MAX_PARTITION][4] = {0x0};
+					if(root_ctrl->h_app_photo)
+					{
+						GUI_ManWinDelete(root_ctrl->h_app_photo);
+						root_ctrl->h_app_photo = 0;
+					}
+					ret = rat_get_partition_name(RAT_SD_CARD, diskname);
+					if(ret || (diskname[0][0] == 0))
+					{
+						app_root_show_dlg(root_ctrl->root_para->h_parent,STRING_ROOT_INSERT_SD,0, 0);
+						app_home_restore(msg);
+						return EPDK_FAIL;
+					}
+					app_root_delete_all_app(root_ctrl);
+					root_para->explorer_path = EXPL_BOOT_WECHAT;
+					root_para->data = ID_EXPLORER_PHOTO;
+					exp_play_mode->play_state = EXPLOROER_SW_TO_MOVIE;
+					root_para->voice_enter_mode = 2; //直锟接斤拷锟斤拷频锟侥凤拷式
+					ret =  app_explorer_create(root_para);
+					root_para->photo_enter_mode = 0;
+					if(NULL == ret)
+					{
+						__msg("create explorer fail , home restore\n") ;
+						app_home_restore(msg);
+					}
+					else
+					{
+						root_ctrl->h_app_explorer = ret ;
+						GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+					}
+					 break;
+				} 
+				default:
+				  break;
+			}
+			break;
+		}	
+		default:
+			break;
+	}
+	return EPDK_OK;
+}
+static __s32 app_root_karaok_id(__gui_msg_t *msg)
+{
+	root_para_t *root_para;
+	root_ctrl_t *root_ctrl;
+	root_ctrl = (root_ctrl_t*)GUI_WinGetAddData(msg->h_deswin);
+	root_para = root_ctrl->root_para;
+	switch(HIWORD(msg->dwAddData1))
+	{
+		case SWITCH_TO_MMENU:
+		{
+			if(root_ctrl->h_app_karaok)
+			{
+				GUI_ManWinDelete(root_ctrl->h_app_karaok);
+				root_ctrl->h_app_karaok = NULL;
+			}
+			app_home_restore(msg);			
+			break;
+		}
+		case SWITCH_TO_EXPLORER:
+		{
+			if(root_ctrl->h_app_karaok)
+			{
+				GUI_ManWinDelete(root_ctrl->h_app_karaok);
+				root_ctrl->h_app_karaok = NULL;
+			}
+			root_ctrl->root_para->h_parent= msg->h_deswin;
+			root_ctrl->h_app_explorer =  app_explorer_create(root_para);
+			GUI_WinSetFocusChild(root_ctrl->h_app_explorer);		
+			break;
+		}
+	}
+	return EPDK_OK;
+}
+
+static __s32 app_root_native_explorer_id(__gui_msg_t* msg)
+{
+	root_para_t *root_para;
+	root_ctrl_t   *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(root_ctrl == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	root_para = root_ctrl->root_para;
+	switch(HIWORD(msg->dwAddData1))
+	{
+		case SWITCH_TO_EXPLORER:
+		{
+			app_root_explorer_switch_disk(root_ctrl);
+			break;
+		}
+		case SWITCH_TO_OTHER_APP:
+		{
+			switch(msg->dwAddData2)
+			{
+				case EXPLR_SW_TO_MAIN:
+				{
+					if(root_ctrl->h_app_explorer)
+					{
+						GUI_ManWinDelete(root_ctrl->h_app_explorer);
+						root_ctrl->h_app_explorer = 0;
+					}
+
+					app_home_restore(msg);
+				}
+				break;
+				case EXPLR_SW_TO_PHOTO:
+				{
+					root_para->data = 0;
+					root_para->root_type = root_para->explr_root;
+					if(root_ctrl->h_app_photo == NULL)
+						root_ctrl->h_app_photo = app_photo_create(root_para);
+					GUI_WinSetFocusChild(root_ctrl->h_app_photo);
+					break;
+				}
+				case EXPLR_SW_TO_POINT_READ:
+				{      
+					char FileName[RAT_MAX_FULL_PATH_LEN] = {0};
+					gscene_hbar_set_state(HBAR_ST_HIDE);
+					gscene_bgd_set_state(BGD_STATUS_HIDE);		
+					eLIBs_strcpy(root_para->pread_filename, (char *)(msg->dwReserved));
+					eLIBs_strcpy(root_para->pread_strkey, "AW0123");
+					eLIBs_printf("FileName = %s\n", FileName);			
+					root_ctrl->h_app_point_read =  awf_manwin_create(root_para);
+					GUI_WinSetFocusChild(root_ctrl->h_app_point_read);						
+					break;
+				}	
+				default:
+					break;
+			}
+			break;
+		}
+		default:
+			break;
+	}
+	return EPDK_OK;
+}
+static __s32 app_root_explorer_id(__gui_msg_t* msg)
+{
+	root_para_t *root_para;
+	root_ctrl_t *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(root_ctrl == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	root_para = root_ctrl->root_para;
+	switch(HIWORD(msg->dwAddData1))
+	{
+		case SWITCH_TO_EXPLORER:
+		{
+			app_root_explorer_switch_disk(root_ctrl);
+			break;
+		}
+		case SWITCH_TO_OTHER_APP:
+		{
+			switch(msg->dwAddData2)
+			{
+				case EXPLR_SW_TO_MAIN:
+				{
+					if(root_ctrl->h_app_explorer)
+					{
+						GUI_ManWinDelete(root_ctrl->h_app_explorer);
+						root_ctrl->h_app_explorer = 0;
+					}
+					app_home_restore(msg);
+				}
+				break;
+				case EXPLR_SW_TO_MOVIE:
+				{
+                    if(root_ctrl->h_app_explorer)
+                    {
+                        GUI_ManWinDelete(root_ctrl->h_app_explorer);
+                        root_ctrl->h_app_explorer = NULL;
+                    }  
+					root_para->data   = 0;
+					root_para->tv_mode = MOVIE_MODE_NORMAL;
+					root_ctrl->h_app_movie = app_movie_create(root_para);
+					GUI_WinSetFocusChild(root_ctrl->h_app_movie);
+				}
+				break;
+				case EXPLR_SW_TO_KARAOKE:
+				{                            
+					if(root_ctrl->h_app_explorer)
+					{
+						GUI_ManWinDelete(root_ctrl->h_app_explorer);
+						root_ctrl->h_app_explorer = NULL;
+					} 
+					root_para->explorer_path = EXPL_BOOT_KALAOK;
+					root_para->data   = 0;
+					root_para->tv_mode = MOVIE_MODE_NORMAL;
+					root_ctrl->h_app_karaok = app_karaok_create(root_para);
+					GUI_WinSetFocusChild(root_ctrl->h_app_karaok);							
+					break;
+				}
+				case EXPLR_SW_TO_MUSIC:
+				{
+					__s32 ret;
+					H_WIN hmusic;			
+					if(root_ctrl->h_app_explorer)
+					{
+						GUI_ManWinDelete(root_ctrl->h_app_explorer);
+						root_ctrl->h_app_explorer = NULL;
+					} 
+					app_root_bgmusic_delete(msg);	
+					root_para->root_type           = msg->dwReserved;		
+					root_para->Option 			   = 1;
+					root_para->explorer_play_music = 1;
+					root_para->data 			   = MUSICPLAYER_NORMAL;
+					if(EPDK_TRUE == app_root_bgmusic_exist(msg, &hmusic))
+					{
+						__u32	last_music_index;
+						char	last_music_path[768];
+						__u32	last_music_start_index;
+						reg_root_para_t *rootpara = NULL;
+						rootpara = dsk_reg_get_para_by_app(REG_APP_ROOT);
+						if(root_para->root_type == RAT_TF)
+						{
+							last_music_start_index  = rootpara->last_music_start_index_sd;
+							last_music_index 		= rootpara->last_music_index_sd;		//锟斤拷一锟轿诧拷锟脚碉拷锟斤拷锟叫猴拷
+							eLIBs_strcpy(last_music_path, rootpara->last_music_path_sd);
+						}
+						else if(root_para->root_type == RAT_USB)
+						{
+							last_music_start_index  = rootpara->last_music_start_index_ud;
+							last_music_index 		= rootpara->last_music_index_ud;		//锟斤拷一锟轿诧拷锟脚碉拷锟斤拷锟叫猴拷
+							eLIBs_strcpy(last_music_path, rootpara->last_music_path_ud);
+						}
+						app_root_bgmusic_delete(msg);
+						if(root_para->root_type == RAT_TF)
+						{
+							rootpara->last_music_start_index_sd  = last_music_start_index;
+							rootpara->last_music_index_sd 		 = last_music_index;		//锟斤拷一锟轿诧拷锟脚碉拷锟斤拷锟叫猴拷
+							eLIBs_strcpy(rootpara->last_music_path_sd, last_music_path);
+						}
+						else if(root_para->root_type == RAT_USB)
+						{
+							rootpara->last_music_start_index_ud  = last_music_start_index;
+							rootpara->last_music_index_ud		 = last_music_index ;		//锟斤拷一锟轿诧拷锟脚碉拷锟斤拷锟叫猴拷
+							eLIBs_strcpy(rootpara->last_music_path_ud, last_music_path);
+						}
+					}
+					Funprintf("--explorer music root_type = %d--\n",root_para->root_type);
+					root_ctrl->h_app_music =  app_music_create(root_para);
+					GUI_WinSetFocusChild(root_ctrl->h_app_music);
+					break;
+				}
+				case EXPLR_SW_TO_PHOTO:
+				{
+					root_para->data = 0;
+					root_para->photo_enter_mode = msg->dwReserved;  //0  锟斤拷锟斤拷图片模式  1 微锟斤拷图片模式
+					root_para->photo_auto_play_flag = 0;
+					if(exp_play_mode->play_state == EXPLOROER_SW_TO_PHOTO)
+						root_para->photo_enter_mode = 1;
+					else
+						root_para->photo_enter_mode = 0;
+					if(root_ctrl->h_app_explorer)
+                    {
+                        GUI_ManWinDelete(root_ctrl->h_app_explorer);
+                        root_ctrl->h_app_explorer = NULL;
+                    }
+					root_ctrl->h_app_photo = app_photo_create(root_para);
+					GUI_WinSetFocusChild(root_ctrl->h_app_photo);
+				}
+				break;
+				default:
+				{
+					__err("media type err...\n");
+				}
+				break;
+			}
+		}
+		break;
+		default:
+			break;
+	}
+	return EPDK_OK;
+}
+static __s32 app_root_native_id(__gui_msg_t* msg)
+{
+	root_para_t *root_para;
+	root_ctrl_t   *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(root_ctrl == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	root_para = root_ctrl->root_para;
+	switch(HIWORD(msg->dwAddData1))
+	{
+		case SWITCH_TO_EXPLORER:
+		{
+			app_root_delete_all_app(root_ctrl);
+			app_root_explorer_switch_disk(root_ctrl);
+			break;
+		}
+		case SWITCH_TO_OTHER_APP:
+		{
+			switch(msg->dwAddData2)
+			{
+				case EXPLR_SW_TO_MAIN:
+				{
+					app_root_delete_all_app(root_ctrl);
+					app_home_restore(msg);
+				}
+				break;
+				case EXPLR_SW_TO_MOVIE:
+				{
+                    app_root_delete_all_app(root_ctrl);
+					root_para->data   = 0;
+					root_para->tv_mode = MOVIE_MODE_NORMAL;
+					root_ctrl->h_app_movie = app_movie_create(root_para);
+					GUI_WinSetFocusChild(root_ctrl->h_app_movie);
+				}
+				break;
+				case EXPLR_SW_TO_KARAOKE:
+				{                            
+					app_root_delete_all_app(root_ctrl);
+					root_para->explorer_path = EXPL_BOOT_KALAOK;
+					root_para->data   = 0;
+					root_para->tv_mode = MOVIE_MODE_NORMAL;
+					root_ctrl->h_app_karaok = app_karaok_create(root_para);
+					GUI_WinSetFocusChild(root_ctrl->h_app_karaok);							
+					break;
+				}
+				case EXPLR_SW_TO_MUSIC:
+				{
+					__s32 ret;
+					__s32 exist;
+					H_WIN hmusic;			
+					app_root_delete_all_app(root_ctrl);
+					app_root_bgmusic_delete(msg);					
+					root_para->Option = 1;
+					root_para->explorer_play_music = 1;
+					root_para->root_type = RAT_TF;
+					root_para->data = MUSICPLAYER_NORMAL;	
+					exist = app_root_bgmusic_exist(msg, &hmusic);
+					if(1 == exist)
+					{
+						__u32	last_music_index;
+						char	last_music_path[768];
+						__u32	last_music_start_index;
+						reg_root_para_t *rootpara = NULL;
+						rootpara = dsk_reg_get_para_by_app(REG_APP_ROOT);
+						if(root_para->root_type == RAT_TF)
+						{
+							last_music_start_index  = rootpara->last_music_start_index_sd;
+							last_music_index 		= rootpara->last_music_index_sd;		//锟斤拷一锟轿诧拷锟脚碉拷锟斤拷锟叫猴拷
+							eLIBs_strcpy(last_music_path, rootpara->last_music_path_sd);
+						}
+						else if(root_para->root_type == RAT_USB)
+						{
+							last_music_start_index  = rootpara->last_music_start_index_ud;
+							last_music_index 		= rootpara->last_music_index_ud;		//锟斤拷一锟轿诧拷锟脚碉拷锟斤拷锟叫猴拷
+							eLIBs_strcpy(last_music_path, rootpara->last_music_path_ud);
+						}
+						app_root_bgmusic_delete(msg);
+						if(root_para->root_type == RAT_TF)
+						{
+							rootpara->last_music_start_index_sd  = last_music_start_index;
+							rootpara->last_music_index_sd = last_music_index;		//锟斤拷一锟轿诧拷锟脚碉拷锟斤拷锟叫猴拷
+							eLIBs_strcpy(rootpara->last_music_path_sd, last_music_path);
+						}
+						else if(root_para->root_type == RAT_USB)
+						{
+							rootpara->last_music_start_index_ud  = last_music_start_index;
+							rootpara->last_music_index_ud = last_music_index ;		//锟斤拷一锟轿诧拷锟脚碉拷锟斤拷锟叫猴拷
+							eLIBs_strcpy(rootpara->last_music_path_ud, last_music_path);
+						}
+					}
+					root_ctrl->h_app_music =  app_music_create(root_para);
+					GUI_WinSetFocusChild(root_ctrl->h_app_music);
+					break;
+				}
+				case EXPLR_SW_TO_PHOTO:
+				{
+					app_root_delete_all_app(root_ctrl);
+					root_para->data = 0;
+					root_para->photo_enter_mode = msg->dwReserved;  //0  锟斤拷锟斤拷图片模式  1 微锟斤拷图片模式
+					root_para->photo_auto_play_flag = 0;
+					if(exp_play_mode->play_state == EXPLOROER_SW_TO_PHOTO)
+						root_para->photo_enter_mode = 1;
+					else
+						root_para->photo_enter_mode = 0;
+					if(root_ctrl->h_app_explorer)
+                    {
+                        GUI_ManWinDelete(root_ctrl->h_app_explorer);
+                        root_ctrl->h_app_explorer = NULL;
+                    }
+					root_ctrl->h_app_photo = app_photo_create(root_para);
+					GUI_WinSetFocusChild(root_ctrl->h_app_photo);
+				}
+				break;
+				case EXPLR_SW_TO_POINT_READ:
+				{      					
+					gscene_hbar_set_state(HBAR_ST_HIDE);
+					gscene_bgd_set_state(BGD_STATUS_HIDE);		
+					eLIBs_strcpy(root_para->pread_filename, (char *)(msg->dwReserved));
+					eLIBs_strcpy(root_para->pread_strkey, "AW0123");
+					 app_root_delete_all_app(root_ctrl);
+					eLIBs_printf("FileName = %s\n", root_para->pread_filename);
+					root_ctrl->h_app_point_read =  awf_manwin_create(root_para);
+					GUI_WinSetFocusChild(root_ctrl->h_app_point_read);						
+					break;
+				}
+				default:
+				{
+					__err("media type err...\n");
+				}
+				break;
+			}
+			root_ctrl->h_app_explorer = NULL;
+		}
+		break;
+		default:
+			break;
+	}
+	return EPDK_OK;
+}
+static __s32 app_root_pread_explorer_id(__gui_msg_t* msg)
+{
+	root_para_t *root_para;
+	root_ctrl_t   *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(root_ctrl == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	root_para = root_ctrl->root_para;
+	switch(HIWORD(msg->dwAddData1))
+	{
+		case SWITCH_TO_EXPLORER:
+		{
+			app_root_delete_all_app(root_ctrl);
+			app_root_explorer_switch_disk(root_ctrl);
+			break;
+		}
+		case SWITCH_TO_OTHER_APP:
+		{
+			switch(msg->dwAddData2)
+			{
+				case EXPLR_SW_TO_MAIN:
+				{
+					app_root_delete_all_app(root_ctrl);
+					app_home_restore(msg);
+				}
+				break;
+
+				case EXPLR_SW_TO_POINT_READ:
+				{      
+					gscene_hbar_set_state(HBAR_ST_HIDE);
+					gscene_bgd_set_state(BGD_STATUS_HIDE);		
+					eLIBs_strcpy(root_para->pread_filename, (char *)(msg->dwReserved));
+					eLIBs_strcpy(root_para->pread_strkey, "AW0123");
+					app_root_delete_all_app(root_ctrl);
+					eLIBs_printf("FileName = %s\n", root_para->pread_filename);
+					root_ctrl->h_app_point_read =  awf_manwin_create(root_para);
+					GUI_WinSetFocusChild(root_ctrl->h_app_point_read);						
+					break;
+				}					
+				default:
+					break;
+			}
+			break;
+			root_ctrl->h_app_explorer = NULL;
+		}
+		default:
+			break;
+	}
+	return EPDK_OK;
+}
+static __s32 app_root_point_read_id(__gui_msg_t* msg)
+{
+	root_para_t *root_para;
+	root_ctrl_t   *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(root_ctrl == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	root_para = root_ctrl->root_para;
+	switch(HIWORD(msg->dwAddData1))
+	{
+		case SWITCH_TO_OTHER_APP:
+		{
+			switch(msg->dwAddData2)
+			{
+				case SWITCH_TO_MMENU:
+				{
+					if(root_ctrl->h_app_point_read)
+					{
+						GUI_ManWinDelete(root_ctrl->h_app_point_read);
+						root_ctrl->h_app_point_read = NULL;
+					}
+					app_home_restore(msg);
+					break;	
+				}
+			}
+			break;
+		}
+		case SWITCH_TO_EXPLORER:
+		{
+			__s32 ret = 0 ;
+			if(root_ctrl->h_app_point_read)
+			{
+				GUI_ManWinDelete(root_ctrl->h_app_point_read);
+				root_ctrl->h_app_point_read = NULL;
+			}
+
+			if(root_ctrl->h_app_explorer)
+			{
+				GUI_ManWinDelete(root_ctrl->h_app_explorer);
+				root_ctrl->h_app_explorer = NULL;
+			}
+
+			root_para->data = RAT_MEDIA_TYPE_POINT_READ;;
+			ret =  pread_app_explorer_create(root_para);
+			if(EPDK_FAIL == ret)
+			{
+				__msg("home restore--->\n");
+				app_home_restore(msg);
+			}
+			else
+			{
+				__msg("go to explorer--->\n");
+				root_ctrl->h_app_explorer = ret ;
+				GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+			}
+			break;
+		}		
+		default:
+		{
+			break;
+		}
+	}
+	
+	return EPDK_OK;
+}
+
+static __s32 app_root_movie_id(__gui_msg_t* msg)
+{
+	root_para_t *root_para;
+	root_ctrl_t   *root_ctrl;
+	__s32 ret;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(root_ctrl == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	root_para = root_ctrl->root_para;
+	
+	switch(HIWORD(msg->dwAddData1))
+	{
+		case SWITCH_TO_EXPLORER:
+		{
+			if(root_ctrl->h_app_movie)
+			{
+				GUI_ManWinDelete(root_ctrl->h_app_movie);
+				root_ctrl->h_app_movie = NULL;
+			}
+			Funprintf("--app movie play state = %d--\n",exp_play_mode->play_state);
+			if(exp_play_mode->play_state == EXPLOROER_SW_TO_MOVIE)
+			{				
+				root_para->explorer_path = EXPL_BOOT_WECHAT;
+				root_para->data = ID_EXPLORER_PHOTO;
+				ret = app_explorer_create(root_para);
+				if(EPDK_FAIL == ret)
+				{
+					__msg("create explorer fail , home restore\n") ;
+					app_home_restore(msg);
+				}
+				else
+				{
+					root_ctrl->h_app_explorer = ret;
+					GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+				}
+			}
+			else if(exp_play_mode->play_state == EXPLOROER_SSW_TO_NATIVE)
+			{
+				char diskname[RAT_MAX_PARTITION][4] = {0x0};
+				ret = rat_get_partition_name(RAT_SD_CARD, diskname);
+				if(ret || (diskname[0][0] == 0))
+				{
+					app_root_show_dlg(root_ctrl->root_para->h_parent,STRING_ROOT_INSERT_SD,0, 0);
+					app_home_restore(msg);
+					return EPDK_FAIL;
+				}
+				root_para->data = ID_EXPLORER_MOVIE;
+				ret = app_native_app_explorer_create(root_para);
+				if(EPDK_FAIL == ret)
+				{
+					__msg("create explorer fail , home restore\n") ;
+					app_home_restore(msg);
+				}
+				else
+				{
+					root_ctrl->h_app_explorer = ret;
+					GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+				}
+			}
+			else if(exp_play_mode->play_state == EXPLOROER_SSW_TO_MOVIE)
+			{
+				root_para->data = ID_EXPLORER_MOVIE;
+				ret = app_explorer_create(root_para);
+				if(EPDK_FAIL == ret)
+				{
+					__msg("create explorer fail , home restore\n") ;
+					app_home_restore(msg);
+				}
+				else
+				{
+					root_ctrl->h_app_explorer = ret;
+					GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+				}
+			}
+			else
+			{
+				root_para->data = ID_EXPLORER_MOVIE;
+				ret = app_explorer_create(root_para);
+				if(EPDK_FAIL == ret)
+				{
+					__msg("create explorer fail , home restore\n") ;
+					app_home_restore(msg);
+				}
+				else
+				{
+					root_ctrl->h_app_explorer = ret;
+					GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+				}
+			}
+			
+			break;
+		}
+		case SWITCH_TO_MMENU:
+		{
+			if(root_ctrl->h_app_movie)
+			{
+				GUI_ManWinDelete(root_ctrl->h_app_movie);
+				root_ctrl->h_app_movie = NULL;
+			}
+			app_home_restore(msg);
+			break;
+		}
+		default:
+		{
+			break;
+		}
+	}
+	return EPDK_OK;
+}
+static __s32 app_root_music_id(__gui_msg_t* msg)
+{
+	root_para_t *root_para;
+	root_ctrl_t *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(root_ctrl == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	root_para = root_ctrl->root_para;
+	switch(msg->dwAddData2)
+	{
+		case SWITCH_TO_MMENU:
+		{
+			if(MUSICPLAYER_BACKGROUND == LOWORD(msg->dwReserved))
+			{
+				__msg("music background...\n");
+			}
+			else
+			{
+				__msg("delete music...\n");
+				GUI_ManWinDelete(root_ctrl->h_app_music);
+				root_ctrl->h_app_music = 0;
+			}
+			app_home_restore(msg);
+			break;
+		}
+		case SWITCH_TO_EXPLORER:
+		{
+			__s32	ret = 0 ;
+			if(MUSICPLAYER_BACKGROUND == msg->dwReserved)
+			{
+				__msg("music background...\n");
+			}
+			else
+			{
+				__msg("delete music...\n");
+				GUI_ManWinDelete(root_ctrl->h_app_music);
+				root_ctrl->h_app_music = 0;
+			}
+			root_para->data = ID_EXPLORER_MUSIC;
+			root_para->explorer_path = EXPLORER_BOOT_U_DISK;
+			if(app_root_check_mediafile_exist(root_para->root_type, RAT_MEDIA_TYPE_AUDIO))  
+			{
+				app_root_show_dlg_no_file(root_ctrl->root_para->h_parent, 0);
+				rat_clear_all_list();
+				app_home_restore(msg);
+				return EPDK_OK;
+			}
+			ret =  app_explorer_create(root_para);
+  			if(EPDK_FAIL == ret)
+			{
+				__msg("create explorer fail , home restore\n") ;
+				app_home_restore(msg);
+			}
+			else
+			{
+				root_ctrl->h_app_explorer =  ret;
+				GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+			}
+			break;
+		}
+		case CLOSE_BG_MUSIC:
+		{
+			__msg("delete background music...\n");
+			if(root_ctrl->h_app_music)
+			{
+				GUI_ManWinDelete(root_ctrl->h_app_music);
+				root_ctrl->h_app_music = 0;
+			}
+			break;
+		}		
+		default:
+		{
+			break;
+		}
+	}
+	return EPDK_OK;
+}
+static __s32 app_root_photo_id(__gui_msg_t* msg)
+{
+	root_para_t *root_para;
+	root_ctrl_t   *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(root_ctrl == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	root_para = root_ctrl->root_para;
+	Funprintf("--app photo type = %d--\n",root_ctrl->root_para->root_type);
+	switch(HIWORD(msg->dwAddData1))
+	{
+		case SWITCH_TO_EXPLORER:
+		{
+			__s32 ret = 0 ;
+			if(root_ctrl->h_app_photo)
+			{
+				GUI_ManWinDelete(root_ctrl->h_app_photo);
+				root_ctrl->h_app_photo = NULL;
+			}
+			root_para->data = ID_EXPLORER_PHOTO;
+			root_para->explorer_path = EXPL_BOOT_WECHAT;
+			if(root_para->photo_enter_mode )
+			{
+				/*微锟斤拷图片锟斤拷锟斤拷*/
+				ret =  app_explorer_create(root_para);
+			}
+			else
+			{
+				ret =  native_app_explorer_create(root_para);
+			}
+			
+			if(EPDK_FAIL == ret)
+			{
+				app_home_restore(msg);
+			}
+			else
+			{
+				root_ctrl->h_app_explorer = ret ;
+				GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+			}
+			break;
+		}
+		case OPEN_BG_MUSIC:
+		{
+			app_root_bgmusic_create(msg);
+			break;
+		}
+		case CLOSE_BG_MUSIC:
+		{
+			app_root_bgmusic_delete(msg);
+			break;
+		}
+		case SWITCH_TO_MMENU:
+		{
+			if(root_ctrl->h_app_photo)
+			{
+				GUI_ManWinDelete(root_ctrl->h_app_photo);
+				root_ctrl->h_app_photo = NULL;
+			}
+			app_home_restore(msg);
+			break;
+		}
+		default:
+		{
+			break;
+		}
+	}
+	return EPDK_OK;
+}
+static __s32 app_root_net_explorer_id(__gui_msg_t* msg)
+{
+	root_para_t *root_para;
+	root_ctrl_t   *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(root_ctrl == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	root_para = root_ctrl->root_para;
+	switch(HIWORD(msg->dwAddData1))
+	{
+		case SWITCH_TO_MMENU:
+		{
+			if(root_ctrl->h_app_net_explorer)
+			{
+				GUI_ManWinDelete(root_ctrl->h_app_net_explorer);
+				root_ctrl->h_app_net_explorer = 0;
+			}
+			app_home_restore(msg);
+			break;
+		}
+		default:
+		{
+			break;
+		}
+	}
+	return EPDK_OK;
+}
+
+static __s32 app_root_weather_id(__gui_msg_t* msg)
+{
+	root_para_t *root_para;
+	root_ctrl_t   *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(root_ctrl == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	root_para = root_ctrl->root_para;
+	switch(HIWORD(msg->dwAddData1))
+	{
+		case SWITCH_TO_MMENU:
+		{
+			if(root_ctrl->h_app_weather)
+			{
+				GUI_ManWinDelete(root_ctrl->h_app_weather);
+				root_ctrl->h_app_weather = 0;
+			}
+			app_home_restore(msg);
+			break;
+		}
+
+		default:
+		{
+			break;
+		}
+	}
+	return EPDK_OK;
+}
+static __s32 app_root_wifi_id(__gui_msg_t* msg)
+{
+	root_para_t *root_para;
+	root_ctrl_t *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(NULL == root_ctrl)
+	{
+		return EPDK_FAIL;
+	}
+	root_para = root_ctrl->root_para;
+	switch(HIWORD(msg->dwAddData1))
+	{
+		case SWITCH_TO_OTHER_APP:
+		{
+			switch(msg->dwAddData2)
+			{
+				case WIFI_SW_TO_MAIN:
+				{
+					if(root_ctrl->h_app_wifi)
+					{
+						GUI_ManWinDelete(root_ctrl->h_app_wifi);
+						root_ctrl->h_app_wifi = NULL;
+					}
+					app_home_restore(msg);
+					break;
+				}
+				default:
+					break;
+			}
+			break;
+		}
+		default:
+			break;
+	}
+}
+static __s32 app_root_setting_id(__gui_msg_t* msg)
+{
+	root_para_t *root_para;
+	root_ctrl_t *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(root_ctrl == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	root_para = root_ctrl->root_para;
+	switch(HIWORD(msg->dwAddData1))
+	{
+		case SWITCH_TO_OTHER_APP:
+		{
+			switch(msg->dwAddData2)
+			{
+				case SETTING_SW_TO_MAIN:
+				{
+					if(root_ctrl->h_app_setting)
+					{
+						GUI_ManWinDelete(root_ctrl->h_app_setting);
+						root_ctrl->h_app_setting = NULL;
+					}
+					app_home_restore(msg);
+					break;					
+				}
+				case SETTING_SW_TO_POWER:
+				{
+					if(root_ctrl->h_app_setting)
+					{
+						GUI_ManWinDelete(root_ctrl->h_app_setting);
+						root_ctrl->h_app_setting = NULL;
+					}
+					root_ctrl->root_para->setting_opt = 1;
+					root_ctrl->h_app_setting 		  = app_setting_create(root_para);
+					GUI_WinSetFocusChild(root_ctrl->h_app_setting);	
+					break;					
+				}
+				default:
+					break;
+			}
+		}
+		break;
+		default:
+			break;
+	}
+	return EPDK_OK;
+}
+
+static __s32 app_root_update_id(__gui_msg_t* msg)
+{
+	root_para_t *root_para;
+	root_ctrl_t   *root_ctrl;
+	__s32 ret;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(root_ctrl == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	root_para = root_ctrl->root_para;
+	switch(HIWORD(msg->dwAddData1))
+	{
+		case ADLG_CMD_SET_UI :
+		{
+			char		rootDir = root_ctrl->root_para->fw_update_file_disk;
+			if(DetectUpdateFirmware(&rootDir))
+			{
+				char t_strAbsolutePath_UpdateFirmware[] = PATH__AUTOEXE_LZ_C100_IMG;
+				__wrn("&g_strAbsolutePath_UpdateFirmware[1]=%s\n", &g_strAbsolutePath_UpdateFirmware[1]);
+				if(strcmp(&g_strAbsolutePath_UpdateFirmware[1], &t_strAbsolutePath_UpdateFirmware[1]) == 0)
+				{
+					__wrn("fw update, g_strAbsolutePath_UpdateFirmware=%s\n", g_strAbsolutePath_UpdateFirmware);
+					ret = dsk_start_fw_update(g_strAbsolutePath_UpdateFirmware);
+				}
+				else
+				{
+					__s32 str[] = {0, STRING_EXPLR_FW_UPDATE_CONFIRM};
+					default_dialog(root_ctrl->root_para->h_fw_update_dlg, root_ctrl->root_para->h_parent,
+					               FW_UPDATE_DIALOG_ID, ADLG_YESNO, str);
+					if(root_ctrl->root_para->h_fw_update_dlg)
+					{
+						ret = EPDK_OK;
+					}
+				}
+			}
+		}
+		break;
+		case ADLG_CMD_EXIT:
+		{
+			if(root_para ->h_fw_update_dlg != NULL)
+			{
+				app_dialog_destroy(root_para->h_fw_update_dlg); 		//to delete dialog
+				root_para->h_fw_update_dlg = NULL;
+				if(msg->dwAddData2 == ADLG_IDYES)
+				{
+					char		rootDir = root_ctrl->root_para->fw_update_file_disk;
+					if(DetectUpdateFirmware(&rootDir))
+					{
+						__wrn("fw update, g_strAbsolutePath_UpdateFirmware=%s\n", g_strAbsolutePath_UpdateFirmware);
+						ret = dsk_start_fw_update(g_strAbsolutePath_UpdateFirmware);
+					}
+				}
+				else//ADLG_IDNO	// 锟斤拷锟斤拷锟皆讹拷锟斤拷锟斤拷媒锟斤拷
+				{
+					__msg("fw not update...\n");
+				}
+			}
+		}
+		break;
+		default:
+			break;
+	}
+	return EPDK_FAIL;
+}
+static __s32 app_root_wechat_send_id(__gui_msg_t* msg)
+{
+	root_para_t *root_para;
+	root_ctrl_t   *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(root_ctrl == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	root_para = root_ctrl->root_para;
+	switch(HIWORD(msg->dwAddData1))
+	{
+		case SWITCH_TO_OTHER_APP:
+		{
+			switch(msg->dwAddData2)
+			{
+				case SWITCH_TO_MMENU:
+				{
+					if(wechat_send_layer)
+					{
+						GUI_LyrWinDelete(wechat_send_layer);
+						wechat_send_layer = NULL;
+						if(root_ctrl->h_app_explorer)
+						{
+							GUI_WinSetFocusChild(root_ctrl->h_app_explorer);
+						}
+					}
+					root_ctrl->h_wechat_send = NULL;
+					break;
+				}
+			}
+			break;
+		}
+		default:
+		{
+			break;
+		}
+	}
+	
+	return EPDK_OK;
+}
+
+static __s32 app_root_command_proc(__gui_msg_t* msg)
+{
+	root_para_t *root_para;
+	root_ctrl_t   *root_ctrl;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(root_ctrl == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	root_para = root_ctrl->root_para;
+	root_para->root_type = app_root_get_plugstate(msg);	
+	switch(LOWORD(msg->dwAddData1))
+	{
+		case APP_ROOT_ID:
+		{
+			app_root_root_id(msg);
+			break;
+		}
+		case APP_WECHAT_FLUSH_ID:
+		{
+			dsk_reg_flush(REG_APP_SYSTEM);
+			break;
+		}
+		case APP_HOME_ID:
+		{
+			app_root_home_id(msg);
+			break;
+		}
+		case APP_NATIVE_EXPLORER_ID:
+		{
+			app_root_native_explorer_id(msg);
+			break;
+		}
+		case APP_EXPLORER_ID:
+		{
+			app_root_explorer_id(msg);
+			break;
+		}
+		case APP_NATIVE_ID:
+		{
+			app_root_native_id(msg);
+			break;
+		}		
+		case APP_PREAD_EXPLORER_ID:
+		{
+			app_root_pread_explorer_id(msg);
+			break;
+		}
+		case APP_POINT_READ_ID:
+		{
+			app_root_point_read_id(msg);
+			break;
+		}
+		case APP_MOVIE_ID:
+		{
+			app_root_movie_id(msg);
+			break;
+		}
+		case APP_KARAOK_ID:
+		{
+			app_root_karaok_id(msg);
+			break;
+		}
+		case APP_MUSIC_ID:
+		{
+			app_root_music_id(msg);
+			break;
+		}
+		case APP_PHOTO_ID:
+		{
+			app_root_photo_id(msg);
+			break;
+		}
+		case APP_NET_EXPLORER_ID:
+		{
+			app_root_net_explorer_id(msg);
+			break;
+		}
+		case APP_WEATHER_ID:
+		{
+			app_root_weather_id(msg);
+			break;
+		}
+		case APP_SETTING_ID:
+		{
+			app_root_setting_id(msg);
+			break;
+		}
+		case APP_WIFI_ID:
+		{
+			app_root_wifi_id(msg);
+			break;
+		}
+		case PHOTO_WECHAT_SUB_MENU_ID:
+		{
+			app_root_wechat_send_id(msg);
+			break;
+		}
+		case FW_UPDATE_DIALOG_ID :
+		{
+			__s32 ret = EPDK_FAIL;
+			ret = app_root_update_id(msg);
+			if(ret == EPDK_FAIL)
+			{
+				__msg("fw not update...\n");
+				app_root_update_firmware_giveup(root_ctrl);
+			}
+			break;
+		}
+		default:
+			break;
+	}
+	return EPDK_OK;
+}
+
+static void app_root_weather_thread(void *p_arg)
+{
+	__s32 ret;
+	__time_t now;
+	__date_t date;
+	__u8 time_count_bak = 0;
+	__u8 weather_count_bak = 0;
+	while(1)
+	{
+		if(esKRNL_TDelReq(EXEC_prioself) == OS_TASK_DEL_REQ)
+		{
+			esKRNL_TDel(EXEC_prioself);
+			break;
+		}
+		if(get_first_link_flag())//锟斤拷一锟轿伙拷取时锟斤拷
+		{
+			if(wifi_link_det(NULL))
+			{
+				if(exp_play_mode->link_get_weather == gscene_hbar_wifi_link)
+				{
+					time_count_bak = 0;
+					while(time_count_bak < 15)
+					{
+						if(esKRNL_TDelReq(EXEC_prioself) == OS_TASK_DEL_REQ)
+						{
+						  esKRNL_TDel(EXEC_prioself);
+						  break;
+						}
+						ret = cacti_sntp(&date, &now);
+						if(ret == -1)
+						{
+							//锟斤拷取时锟斤拷锟斤拷锟�
+							__msg("time_count_bak = %d\n",time_count_bak);
+							time_count_bak++;
+						}
+						else
+						{
+						  sim_set_time(&now);//锟斤拷锟斤拷时锟斤拷
+						  sim_set_data(&date);//锟斤拷锟斤拷锟斤拷锟斤拷
+						  break;
+						}
+					}
+					// 锟斤拷取锟斤拷锟斤拷
+					weather_count_bak = 0;
+					while(weather_count_bak < 15)
+					{
+						if(esKRNL_TDelReq(EXEC_prioself) == OS_TASK_DEL_REQ)
+						{
+							esKRNL_TDel(EXEC_prioself);
+							break;
+						}
+						if(root_weather_5days)
+						{
+							cacti_wearther_free(root_weather_5days);
+							root_weather_5days = NULL;
+						}
+						root_weather_5days = cacti_wearther();
+						if(!root_weather_5days)
+						{
+							//锟斤拷取失锟斤拷
+							weather_count_bak++;
+						}
+						else
+						{
+							set_weather_flag(1);
+							set_mmenu_weather_5days(root_weather_5days);
+							break;
+						}
+					}
+					if(weather_count_bak >= 15)
+					{
+						set_weather_flag(0);
+					}
+					set_first_link_flag(0);
+				}
+			}
+		}
+		else
+		{
+			if(get_hour_flag())
+			{
+				if(wifi_link_det(NULL))
+				{
+					time_count_bak = 0;
+					while(time_count_bak < 5)
+					{
+						if(esKRNL_TDelReq(EXEC_prioself) == OS_TASK_DEL_REQ)
+						{
+							esKRNL_TDel(EXEC_prioself);
+							break;
+						}
+						ret = cacti_sntp(&date, &now);
+						if(ret == -1)
+						{
+							time_count_bak++;
+						}
+						else
+						{
+							sim_set_time(&now);//锟斤拷锟斤拷时锟斤拷
+							sim_set_data(&date);//锟斤拷锟斤拷锟斤拷锟斤拷
+							break;
+						}
+					}
+					weather_count_bak = 0;
+					while(weather_count_bak < 15)
+					{
+						if(esKRNL_TDelReq(EXEC_prioself) == OS_TASK_DEL_REQ)
+						{
+							esKRNL_TDel(EXEC_prioself);
+							break;
+						}
+						if(root_weather_5days)
+						{
+							cacti_wearther_free(root_weather_5days);
+							root_weather_5days = NULL;
+						}
+						root_weather_5days = cacti_wearther();
+						if(!root_weather_5days)
+						{
+							weather_count_bak++;
+						}
+						else
+						{
+							//锟斤拷取锟缴癸拷
+							set_weather_flag(1);
+							set_mmenu_weather_5days(root_weather_5days);
+							break;
+						}
+					}
+					if(weather_count_bak >= 15)
+					{
+						set_weather_flag(0);
+					}
+				}
+				set_hour_flag(0);
+			}
+		}
+		esKRNL_TimeDly(20);
+	}
+}
+
+static __u32 app_root_check_disk(void)
+{
+	__s32 ret;
+	__u32 root_type = RAT_UNKNOWN;
+	char  diskname[RAT_MAX_PARTITION][4] = {0x0};
+	ret = rat_get_partition_name(RAT_USB_DISK, diskname);
+	if(EPDK_OK == ret)
+	{
+		if (diskname[0][0])
+		{
+			root_type += RAT_USB;
+		}
+	}
+	ret = rat_get_partition_name(RAT_SD_CARD, diskname);
+	if(EPDK_OK == ret)
+	{  
+		if (diskname[0][0])
+		{
+			root_type += RAT_TF<<8;
+		}
+	}
+	return root_type;   
+}
+
+static __u8 app_root_get_plugstate(__gui_msg_t *msg)
+{
+	root_ctrl_t *root_ctrl = NULL; 
+	__u8 Tmp_Type = 0;
+	root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	root_ctrl->Plug_Type = app_root_check_disk();			
+	root_ctrl->Plug_Tf	= (root_ctrl->Plug_Type >> 8)&0x00ff;
+	root_ctrl->Plug_Usb = (root_ctrl->Plug_Type)&0x00ff;	
+	if(root_ctrl->Plug_Tf)
+	{
+		if(root_ctrl->Plug_Usb)
+		{
+			/*root_type 锟窖撅拷锟斤拷取锟斤拷前锟侥达拷锟斤拷*/
+			if(root_ctrl->root_para->root_type == root_ctrl->Plug_Tf)
+			{			
+				Tmp_Type = RAT_TF;
+			}
+			else
+			{
+				Tmp_Type = RAT_USB;	
+			}
+		}	
+		else
+		{
+			Tmp_Type = RAT_TF;
+		}				
+	}			
+	else if(root_ctrl->Plug_Usb)	
+	{
+		Tmp_Type = RAT_USB;
+	}		
+	else
+	{
+		Tmp_Type = RAT_UNKNOWN;
+		return EPDK_FAIL;
+	}
+	return Tmp_Type;
+}
+
+static __s32 app_root_win_proc(__gui_msg_t *msg)
+{
+	switch(msg->id)
+	{
+		case GUI_MSG_CREATE:
+		{
+			root_para_t *root_para;
+			root_ctrl_t *root_ctrl;
+			__time_t now,new_time;	
+			__date_t date,new_date;
+			RECT rect;
+			exp_play_mode = esMEMS_Balloc(sizeof(exp_play_mode_t));
+			if(exp_play_mode == NULL)
+			{
+				return EPDK_FAIL;
+			}
+			eLIBs_memset(exp_play_mode, 0, sizeof(exp_play_mode_t));
+			exp_play_mode->link_get_weather = 0;
+			root_para = esMEMS_Balloc(sizeof(root_para_t));
+
+			if(!root_para)
+			{
+				esMEMS_Bfree(exp_play_mode, sizeof(exp_play_mode_t));
+				return EPDK_FAIL;
+			}
+
+			eLIBs_memset(root_para, 0, sizeof(root_para_t));
+			root_ctrl = esMEMS_Balloc(sizeof(root_ctrl_t));
+
+			if(!root_ctrl)
+			{
+				esMEMS_Bfree(root_para, sizeof(root_para_t));
+				esMEMS_Bfree(exp_play_mode, sizeof(exp_play_mode_t));
+				return EPDK_FAIL;
+			}
+			eLIBs_memset(root_ctrl, 0, sizeof(root_ctrl_t));
+			esKSRV_close_logo();
+			esKSRV_release_logo_buf();
+			//????????
+			now.hour = ROOT_DEFAULT_HOUR;
+			now.minute = ROOT_DEFAULT_MINUTE;
+			now.second = ROOT_DEFAULT_SECOND;
+			sim_set_time(&now);
+
+			//?????????
+			date.year = ROOT_DEFAULT_YEAR;
+			date.month = ROOT_DEFAULT_MONTH;
+			date.day = ROOT_DEFAULT_DAY;
+			sim_set_data(&date);
+			
+
+
+			rect.x = 0;
+			rect.y = 0;
+			rect.width = 800;
+			rect.height = 480;
+			integate_app_layer = app_root_layer_create(rect,1);
+			dsk_keytone_set_key_type(KEYTONE_KEY_TYPE_DOWN);
+			eLIBs_memset(root_ctrl, 0, sizeof(root_ctrl_t));
+			root_para->h_parent		= msg->h_deswin;
+			root_para->font			= SWFFont;
+			root_para->root_type	= 0;
+			root_ctrl->root_para 	= root_para;
+			root_ctrl->num_switch	= EPDK_FALSE;
+			GUI_WinSetAddData(msg->h_deswin, (__u32)root_ctrl);
+	       	com_set_backcolor(CONST_BackColor);	
+	       	gscene_bgd_set_state(BGD_STATUS_SHOW);
+	       	root_ctrl->m_updateFirmwareLog = LOG_UpdateFirmware_By_RootCreate;
+	       	if(!app_root_detect_update_firmware(root_ctrl))
+	       	{
+                 SEND_MSG(DSK_MSG_RELEASE_TIMER_DET_UDISK, NULL, GUI_WinGetHandFromName("init"), 0, 0, 0);
+                 root_ctrl->h_app_home	= app_home_create(root_para);
+                 GUI_WinSetFocusChild(root_ctrl->h_app_home);
+	       	}
+			dsk_display_lcd_on();
+			set_first_link_flag(1);
+			set_low_wait_exit_app_state(0);
+			app_root_weather_thread_id = esKRNL_TCreate(app_root_weather_thread,NULL,0x1000,KRNL_priolevel5);
+			GUI_SetTimer(msg->h_deswin,APP_ROOT_CHECK_TIME_ID, APP_ROOT_CHECK_TIME_VALUE, NULL);
+			GUI_SetTimer(msg->h_deswin, AMPLIFER_CHECK_TIMMER_ID, AMPLIFER_CHECK_TIME, NULL);
+			wifi_mod_set(1);		
+			if(wifi_link_det(NULL))
+			{
+				exp_play_mode->link_get_weather = gscene_hbar_wifi_link;			
+				if(g_wx_param == NULL)
+				{
+					BBC_init();
+				}
+				gscene_hbar_link_set_state(gscene_hbar_wifi_link);
+			}
+			new_date.year = 2016;
+			new_date.month = 7;
+			new_date.day = 29;
+			
+			new_time.hour=19;
+			new_time.minute= 0;
+			new_time.second = 1;	
+			root_para->root_type = app_root_get_plugstate(msg);
+		    return EPDK_OK;
+		}
+		case GUI_MSG_TIMER:
+		{
+			root_ctrl_t *root_ctrl;
+			root_para_t *root_para;
+			static __u8 timer_cnt = 0;
+			static __u8  mic_flag = 0;
+			__time_t now;
+			__date_t date;
+			__u32 usb_state;
+			root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			if(!root_ctrl)
+			{
+				__err("root_ctrl is null...\n");
+				return EPDK_OK;
+			}
+			root_para = root_ctrl->root_para;
+			if(msg->dwAddData1 == APP_ROOT_CHECK_TIME_ID)
+			{
+				__time_t now;
+				eLIBs_memset(&now, 0, sizeof(__time_t));
+				if(get_weather_flag())
+				{
+					sim_get_time(&now);
+					esTIME_SetTime(&now);
+					if(GUI_IsTimerInstalled(msg->h_deswin, APP_ROOT_CHECK_TIME_ID))
+					{
+						GUI_KillTimer(msg->h_deswin, APP_ROOT_CHECK_TIME_ID);
+					}
+				}
+				else
+				{
+					esTIME_SetTime(&now);
+				}
+			}
+			if(msg->dwAddData1 == APP_ROOT_VOLUME_TIME_ID)
+			{
+				GUI_KillTimer(msg->h_deswin, APP_ROOT_VOLUME_TIME_ID);
+				app_root_volume_delete(root_ctrl);
+			}			
+			if(LOWORD(msg->dwAddData1) == AMPLIFER_CHECK_TIMMER_ID)
+			{
+				__cedar_status_t robin_sta = CEDAR_STAT_;
+				if(root_ctrl->h_app_net_explorer || root_ctrl->h_app_point_read)
+				{
+					return EPDK_OK;
+				}
+				if(robin_is_open() == EPDK_TRUE)
+				{
+					robin_sta = robin_get_fsm_status();
+				}
+				if((robin_sta == CEDAR_STAT_PLAY) || net_movie_control_amplifier_flag ||wechat_get_msg_flag )
+				{
+				
+					if(EPDK_FALSE== dsk_amplifier_is_on())
+					{
+						dsk_amplifier_onoff(BEETLES_SPEAK_ON);
+					}
+				}
+				else
+				{
+					if(EPDK_TRUE == dsk_amplifier_is_on()&& (IOCTRL__MIC_DET__IS_PLUGOUT()))
+					{
+						dsk_amplifier_onoff(BEETLES_SPEAK_OFF);
+					}					
+				}
+				if(IOCTRL__MIC_DET__IS_PLUGIN() && (root_ctrl->h_app_karaok ==  NULL)&&(root_para->mic_flag == 0))
+				{
+					root_para->mic_flag = 1;
+					Funprintf("--root_type = %d--\n",root_para->root_type);
+					{
+						__s32 ret = 0;
+						char diskname[RAT_MAX_PARTITION][4] = {0x0};
+						ret = rat_get_partition_name(RAT_SD_CARD, diskname);
+						if(ret || (diskname[0][0] == 0))
+						{
+							app_root_show_dlg(root_ctrl->root_para->h_parent,STRING_ROOT_INSERT_SD,0, 0);
+							return EPDK_FAIL;
+						}
+					}					
+					if(app_root_set_playfile_ex(RAT_TF,RAT_MEDIA_TYPE_VIDEO,EXPL_BOOT_KALAOK))
+					{	
+						return EPDK_OK;		
+					}
+					gscene_hbar_set_text(root_para->explorer_path);
+					app_root_delete_all_app(root_ctrl);
+					root_para->explorer_path = EXPL_BOOT_KALAOK;
+					root_para->data   = 0;
+					root_para->tv_mode = MOVIE_MODE_NORMAL;
+					root_ctrl->h_app_karaok = app_karaok_create(root_para);
+					GUI_WinSetFocusChild(root_ctrl->h_app_karaok);	
+					break;
+				}
+				else if(IOCTRL__MIC_DET__IS_PLUGOUT())
+				{
+					root_para->mic_flag = 0;
+				}
+				return EPDK_OK;
+			}
+			else if(LOWORD(msg->dwAddData1) == APP_ROOT_USBPLUG_TIME_ID)
+			{
+				timer_cnt++;
+				if((15 == timer_cnt)||(EPDK_FALSE == dsk_get_charge_state())) 
+				{
+					timer_cnt = 0;
+					if(GUI_IsTimerInstalled(msg->h_deswin, APP_ROOT_USBPLUG_TIME_ID))
+					{				
+						GUI_KillTimer(msg->h_deswin, APP_ROOT_USBPLUG_TIME_ID);
+					}
+				}
+			}
+			break;
+		}
+
+		case GUI_MSG_CLOSE:
+		{
+			GUI_ManWinDelete(msg->h_deswin);
+			return EPDK_OK;
+		}
+		case GUI_MSG_DESTROY:
+		{
+			root_para_t *root_para;
+			root_ctrl_t   *root_ctrl;
+			root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			
+			if(!root_ctrl)
+			{
+				__msg("******err****\n");
+				return EPDK_OK;
+			}
+
+			root_para = (root_para_t *)root_ctrl->root_para;
+
+			if(!root_para)
+			{
+				__msg("******err****\n");
+				return EPDK_OK;
+			}
+			exp_play_mode->delete_wechat_text = 0;
+			app_root_wechat_exit(msg);
+			wifi_mod_set(0);
+			app_root_delete_all_app(root_ctrl);
+			BBC_uninit(g_wx_param);				
+			if(exp_play_mode)
+			{
+				esMEMS_Bfree(exp_play_mode, sizeof(exp_play_mode_t));
+				exp_play_mode = NULL;
+			}
+
+			if(app_root_weather_thread_id != 0)
+			{
+				while( esKRNL_TDelReq(app_root_weather_thread_id) != OS_TASK_NOT_EXIST )
+				{
+					esKRNL_TimeDly(5);
+				}
+				app_root_weather_thread_id = 0;
+			}
+			
+			if(root_weather_5days != NULL)
+			{
+				cacti_wearther_free(root_weather_5days);
+				root_weather_5days = NULL;
+			}			
+
+			if (wifi_control_sem)
+        	{		
+				__u8    err;
+        		esKRNL_SemDel(wifi_control_sem, OS_DEL_ALWAYS, &err);		
+        		wifi_control_sem = NULL;
+			}
+
+			if(integate_app_layer)
+			{
+				GUI_LyrWinDelete(integate_app_layer);
+				integate_app_layer = NULL;
+			}
+			app_root_volume_delete(root_ctrl);
+			gscene_bgd_set_default_bg_index(m_eBgdIdx_styleTotal);			
+			dsk_amplifier_onoff(BEETLES_SPEAK_OFF);
+			app_root_volume_delete(root_ctrl);
+			if(GUI_IsTimerInstalled(msg->h_deswin, APP_ROOT_CHECK_TIME_ID))
+			{
+				GUI_KillTimer(msg->h_deswin, APP_ROOT_CHECK_TIME_ID);
+			}
+
+			if(GUI_IsTimerInstalled(msg->h_deswin, AMPLIFER_CHECK_TIMMER_ID))
+			{
+				GUI_KillTimer(msg->h_deswin, AMPLIFER_CHECK_TIMMER_ID);
+			}
+
+			if(GUI_IsTimerInstalled(msg->h_deswin, APP_ROOT_USBPLUG_TIME_ID))
+			{
+				GUI_KillTimer(msg->h_deswin, APP_ROOT_USBPLUG_TIME_ID);
+			}
+			if(GUI_IsTimerInstalled(msg->h_deswin, APP_ROOT_VOLUME_TIME_ID))
+			{
+				GUI_KillTimer(msg->h_deswin, APP_ROOT_VOLUME_TIME_ID);
+			}			
+			if(root_ctrl->root_para->h_fw_update_dlg)
+			{
+				app_dialog_destroy(root_ctrl->root_para->h_fw_update_dlg);		//to delete dialog
+				root_ctrl->root_para->h_fw_update_dlg = NULL;
+			}
+			recving_lock = 0;
+			esMEMS_Bfree(root_para, sizeof(root_para_t));
+			esMEMS_Bfree(root_ctrl, sizeof(root_ctrl_t));
+			return EPDK_OK;
+		}
+		case GUI_MSG_COMMAND:
+		{
+			app_root_command_proc(msg);
+			return EPDK_OK;
+		}
+		case GUI_MSG_KEY:
+		{
+			root_ctrl_t *root_ctrl;
+			root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);	
+			Funprintf("--app key dw1 = %d--\n",msg->dwAddData1);
+			if(photo_set_willow_state >= 1 && msg->dwAddData1 != GUI_MSG_KEY_ENTER)
+			{
+				return EPDK_OK;
+			}
+			if(EPDK_OK == app_root_wechat_exit(msg))
+			{
+				return EPDK_OK;
+			}			
+	        if(root_ctrl->num_switch) 
+	        {
+	          	app_root_story_switch(msg);
+	          	return EPDK_TRUE;
+	        }
+			app_root_key(msg);
+			break;
+		}
+		case DSK_MSG_FS_PART_PLUGIN:
+		{
+			root_ctrl_t *root_ctrl;	
+			__u8 Tmp_Type = 0;
+			char diskname[4];
+			root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			diskname[0] = (__u8)(msg->dwAddData2);
+			diskname[1] = '\0';
+			msg->dwAddData2 = diskname[0];		
+			root_ctrl->Plug_Type = app_root_check_disk();	
+
+			
+			root_ctrl->Plug_Tf  = (root_ctrl->Plug_Type >> 8)&0x00ff;
+			root_ctrl->Plug_Usb = (root_ctrl->Plug_Type)&0x00ff;	
+			Funprintf("--AppRoot Plugin type = %d tf = %d usb = %d--\n\n",root_ctrl->Plug_Type,root_ctrl->Plug_Tf,root_ctrl->Plug_Usb);
+			if(root_ctrl->Plug_Tf)
+			{
+				if(root_ctrl->Plug_Usb)
+				{
+					if(root_ctrl->root_para->root_type == root_ctrl->Plug_Tf)
+					{			
+						Tmp_Type = RAT_USB;
+					}
+					else
+					{
+						Tmp_Type = RAT_TF;	
+					}
+				}	
+				else
+				{
+					Tmp_Type = RAT_TF;
+				}				
+			}			
+			else if(root_ctrl->Plug_Usb)	
+			{
+				Tmp_Type = RAT_USB;
+			}		
+			else
+			{
+				Tmp_Type = RAT_UNKNOWN;
+				return EPDK_FAIL;
+			}
+			root_ctrl->root_para->root_type = Tmp_Type; 
+			if(RAT_USB == Tmp_Type)
+			{
+				app_root_show_dlg(msg->h_deswin, STRING_ROOT_UD_PLUGIN, STRING_ROOT_CUE, 100);	
+			}
+			else if(RAT_TF == Tmp_Type)
+			{
+				app_root_show_dlg(msg->h_deswin, STRING_ROOT_SD_PLUGIN, STRING_ROOT_CUE, 100);	
+			}
+			else 
+			{
+				return EPDK_FAIL;
+			}
+			if(root_ctrl->root_para->h_fw_update_dlg)
+			{
+				return EPDK_OK;
+			}
+			root_ctrl->m_updateFirmwareLog = LOG_UpdateFirmware_By_FSPlugin;
+			root_ctrl->root_para->fw_update_file_disk = diskname[0];
+			if(!app_root_detect_update_firmware(root_ctrl))
+			{
+				__s32 reg_storage_type;
+				__s32 reg_media_type;
+				reg_storage_type = __app_root_get_reg_storage_type(diskname[0]);
+				root_ctrl->root_para->log &= ~MASK_RootLog__LastFs;
+				switch(reg_storage_type)
+				{
+					case 0:
+						root_ctrl->root_para->log |= OP_RootLog__LastFs_SD;
+						break;
+
+					case 1:
+						root_ctrl->root_para->log |= OP_RootLog__LastFs_UD;
+						break;
+
+					default :
+						break;
+				}
+				if(reg_storage_type == 0)
+				{
+					app_root_create_story_dir(RAT_TF);
+					app_root_create_read_dir(RAT_TF);
+				}
+				reg_media_type = -1;
+				if(-1 != reg_storage_type)
+				{
+					if(root_ctrl->h_app_home&& MULTI_SCREEN_HOME_MODE_NORMAL == app_multi_screen_home_get_mode(root_ctrl->h_app_home))
+					{
+
+					}
+				}
+				else
+				{
+					__wrn("reg_storage_type type error...\n");
+				}
+			}
+			if(exp_play_mode)
+			{
+				exp_play_mode->plugin = 1;
+			}
+			return EPDK_OK;
+		}
+		case DSK_MSG_FS_PART_PLUGOUT:
+		{
+			root_ctrl_t *root_ctrl;
+			__u8 Tmp_Type = 0;
+			root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			root_ctrl->Plug_Type = app_root_check_disk();			
+			root_ctrl->Plug_Tf	= (root_ctrl->Plug_Type >> 8)&0x00ff;
+			root_ctrl->Plug_Usb = (root_ctrl->Plug_Type)&0x00ff;	
+			Funprintf("--AppRoot PlugOut type = %d tf = %d usb = %d--\n\n",root_ctrl->Plug_Type,root_ctrl->Plug_Tf,root_ctrl->Plug_Usb);
+			if (root_ctrl->Plug_Tf == RAT_TF)
+			{
+				if(root_ctrl->Plug_Usb == RAT_USB)
+				{
+					Tmp_Type = root_ctrl->root_para->root_type;
+				}
+				else
+				{
+					Tmp_Type = RAT_TF;
+					app_root_show_dlg(msg->h_deswin, STRING_ROOT_UD_PLUGOUT, 0, 0);		
+				}
+			}
+			else if(root_ctrl->Plug_Usb == RAT_USB)
+			{
+				if(root_ctrl->root_para->root_type == RAT_TF)
+				{
+					Tmp_Type = RAT_USB;
+				}
+				else
+				{
+					Tmp_Type = RAT_USB;
+				}
+				app_root_show_dlg(msg->h_deswin, STRING_ROOT_SD_PLUGOUT, 0, 0);				
+			}
+			else
+			{
+				if(RAT_USB == root_ctrl->root_para->root_type)
+				{
+					app_root_show_dlg(msg->h_deswin, STRING_ROOT_UD_PLUGOUT, 0, 0);
+
+				}
+				else if(RAT_TF == root_ctrl->root_para->root_type)
+				{	
+					app_root_show_dlg(msg->h_deswin, STRING_ROOT_SD_PLUGOUT, 0, 0);
+				}
+				Tmp_Type = 0;
+			}
+			dsk_orchid_save_last_expl_list(NULL);
+			if(EPDK_OK == root_ctrl->Plug_Type)	/*TF and USB Out*/
+			{				
+				root_ctrl->root_para->root_type = root_ctrl->Plug_Type; 
+				if(EPDK_FAIL == app_root_play_other_storages_on_plugout(root_ctrl))
+				{
+					__app_root_broadcast_msg(msg);
+				}
+				app_do_async(msg->h_deswin, APP_ROOT_MSG_DO_ASYNC, rat_clear_all_list_by_root, (void *)(msg->dwAddData2));
+				return EPDK_OK;
+			}	
+			if(root_ctrl->root_para->root_type != Tmp_Type)
+			{
+				root_ctrl->root_para->root_type = Tmp_Type; 
+				if(root_ctrl->root_para->h_fw_update_dlg)
+				{
+					char rootDir = root_ctrl->root_para->fw_update_file_disk;
+					if(!DetectUpdateFirmware(&rootDir))
+					{
+						app_dialog_destroy(root_ctrl->root_para->h_fw_update_dlg);		
+						root_ctrl->root_para->h_fw_update_dlg = NULL;
+						app_root_update_firmware_giveup(root_ctrl);
+					}
+				}
+				else
+				{
+					if(EPDK_FAIL == app_root_play_other_storages_on_plugout(root_ctrl))
+					{
+						__app_root_broadcast_msg(msg);
+					}
+				}
+				app_do_async(msg->h_deswin, APP_ROOT_MSG_DO_ASYNC, rat_clear_all_list_by_root, (void *)(msg->dwAddData2));
+			}
+			else
+			{
+				__app_root_broadcast_msg(msg);
+			}
+			return EPDK_OK;
+		}
+		case DSK_MSG_HOME:
+		{
+			root_ctrl_t   *root_ctrl;
+			root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			msg->dwReserved = 0;
+			__app_root_broadcast_msg(msg);
+			return EPDK_OK;
+		}
+	 	case DSK_MSG_WIFI_PART_PLUGIN:
+		{
+			root_ctrl_t   *root_ctrl;
+			root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			app_root_process_before_show_dlg(root_ctrl);
+			app_tips_show(NULL, STRING_NET_DEV_PLUGIN);
+			
+			if(!wifi_list_save_det_all(dsk_reg_get_para_by_app(REG_APP_WIFI)))
+			{
+				app_tips_show(NULL, STRING_NET_LINK_CUE);
+			}
+			app_root_process_after_show_dlg(root_ctrl);
+			wifi_mod_set(1);
+			
+			__app_root_broadcast_msg(msg);
+			
+			return EPDK_OK;
+		}
+
+		case DSK_MSG_WIFI_PART_PLUGOUT:
+		{
+			wifi_mod_set(0);
+			__app_root_broadcast_msg(msg);
+			return EPDK_OK;
+		}
+		case DSK_MSG_WIFI_PART_LINKING:
+		{
+			root_ctrl_t   *root_ctrl;
+			root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			__app_root_broadcast_msg(msg);
+			{
+				app_root_process_before_show_dlg(root_ctrl);
+				app_tips_show(NULL, STRING_NET_CONNECTED);
+				app_root_process_after_show_dlg(root_ctrl);
+			}
+			gscene_hbar_link_set_state(gscene_hbar_wifi_link);
+			if(g_wx_param == NULL)
+				BBC_init();
+			if(exp_play_mode)
+			{
+				exp_play_mode->h_parent = root_ctrl->root_para->h_parent;
+				exp_play_mode->link_get_weather = gscene_hbar_wifi_link;
+			}
+			return EPDK_OK;
+		}
+		case DSK_MSG_WIFI_PART_UNLINKING:
+		{
+			root_ctrl_t   *root_ctrl;
+			root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			if(root_ctrl->h_app_net_explorer)
+			{
+				__msg("*********net_explorer to home**********\n");
+				GUI_ManWinDelete(root_ctrl->h_app_net_explorer);
+				root_ctrl->h_app_net_explorer = 0;
+				app_home_restore(msg);
+			}		
+			gscene_hbar_link_set_state(gscene_hbar_wifi_unlink);
+			if(exp_play_mode)
+			{
+				exp_play_mode->h_parent = NULL;
+				exp_play_mode->link_get_weather = gscene_hbar_wifi_unlink;
+			}
+			BBC_uninit(g_wx_param);			
+			app_root_process_before_show_dlg(root_ctrl);
+			app_tips_show(NULL, STRING_NET_NOT_CONNECTED);
+			app_root_process_after_show_dlg(root_ctrl);
+			return EPDK_OK;
+		}
+
+		case DSK_MSG_ALARM:
+		{
+			root_ctrl_t   *root_ctrl;
+			root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			__msg("app_root_broadcast_msg, msg->dwAddData1=%d\n", msg->dwAddData1);
+			__app_root_broadcast_msg(msg);
+			return EPDK_OK;
+		}
+
+		case DSK_MSG_TVDAC_PLUGOUT:
+		case DSK_MSG_HDMI_PLUGOUT:
+		case DSK_MSG_SCREEN_OPEN :
+		case DSK_MSG_SCREEN_CLOSE :
+		case DSK_MSG_SCREEN_FORCE_CLOSE :
+		{
+			__wrn("__app_root_broadcast_msg, msg->dwAddData1=%d\n", msg->dwAddData1);
+			__app_root_broadcast_msg(msg);
+			return EPDK_OK;
+		}
+
+		case APP_ROOT_MSG_DO_ASYNC:
+		{
+			p_app_root_fun pfun;
+			if(!msg->dwAddData1)
+			{
+				return EPDK_OK;
+			}
+			pfun = (p_app_root_fun)(msg->dwAddData1);
+			pfun((void *)(msg->dwAddData2));
+			__here__;
+			return EPDK_OK;
+		}
+		case DSK_MSG_HOME_RETURN:
+		{
+			root_ctrl_t   *root_ctrl;
+			root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			app_root_delete_all_app(root_ctrl); 		
+			gscene_bgd_set_state(BGD_STATUS_SHOW);
+			gscene_hbar_set_state(HBAR_ST_HIDE);
+ 			app_home_restore(msg);	
+			return EPDK_OK;
+		}
+		case DSK_MSG_HOME_DIALOG:
+		{
+			root_ctrl_t   *root_ctrl;
+			root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			app_root_show_dlg(msg->h_deswin, STRING_ROOT_USB_CONNECT, STRING_ROOT_CUE, 100);	
+			GUI_SetTimer(msg->h_deswin,APP_ROOT_USBPLUG_TIME_ID, APP_ROOT_USBPLUG_TIME_VALUE, NULL);			
+			return EPDK_OK;
+		}
+		case DSK_MSG_HOME_POWER_OFF:
+		{
+			root_ctrl_t   *root_ctrl;
+			root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			app_root_delete_all_app(root_ctrl);	
+			app_home_restore(msg);			
+			BBC_uninit(g_wx_param);			
+			set_low_wait_exit_app_state(1);
+			return EPDK_OK;
+		}
+		case DSK_MSG_NUM_SWITCH:
+		{
+		    root_ctrl_t *root_ctrl;
+		    root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+		    if(EPDK_TRUE == msg->dwAddData1) 
+		    {
+				root_ctrl->num_switch = EPDK_TRUE; 
+		    }
+		    else
+		    {
+				root_ctrl->num_switch = EPDK_FALSE; 
+		    }
+		    return EPDK_OK;
+		}
+		case DSK_MSG_WECHAT_CREATE:
+		{
+			root_ctrl_t *root_ctrl;
+		    root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			Funprintf("--here = %d data = %d--\n",root_ctrl->bbc_download_info.t,wechat_data);
+			if((root_ctrl->bbc_download_info.t > BBC_CONTENT_TEXT) && (root_ctrl->bbc_download_info.t < BBC_CONTENT_TICKET))
+			{	
+				__gui_msg_t msg1;
+				if(msg1.h_deswin = GUI_WinGetHandFromName(APP_ROOT))
+				{
+					msg1.h_srcwin   = NULL;
+					msg1.id 		= GUI_MSG_KEY;
+					msg1.dwAddData1 = GUI_MSG_KEY_ENTER;
+					msg1.dwAddData2 = KEY_UP_ACTION;
+					msg1.dwReserved = 0;
+					GUI_SendNotifyMessage(&msg1);
+				}
+			}
+			else if(root_ctrl->bbc_download_info.t == BBC_CONTENT_TEXT && wechat_data != 0)
+			{
+				if(!root_ctrl->hWinFrm_wechatText)
+				{
+					exp_play_mode->delete_wechat_text = 1;
+					app_root_process_before_show_dlg(root_ctrl);
+					root_ctrl->hWinFrm_wechatText = app_wechat_create(msg->h_deswin, 0);
+				}
+				NOTIFY_MSG(GUI_MSG_COMMAND, NULL, root_ctrl->hWinFrm_wechatText, wechat_data, &root_ctrl->bbc_download_info, NULL);
+				wechat_data = 0;
+			}	
+			break;
+		}
+		case MSG_APP_BACK_HOME:
+		{
+			root_ctrl_t *root_ctrl;
+			root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			if(photo_set_willow_state >= 1)
+			{
+				return EPDK_OK;
+			}
+			if(root_ctrl->h_app_home)
+			{
+				return EPDK_OK;
+			}
+			app_root_delete_all_app(root_ctrl);
+			app_home_restore(msg);
+			return EPDK_OK;
+		}
+		case MSG_APP_DELETE_SOURCE:
+		{
+			__app_root_broadcast_msg(msg);
+			return EPDK_OK;
+		}
+		case MSG_APP_WEATHER_CREATE:
+		{
+			root_ctrl_t *root_ctrl;
+			char	linkName[64] = {0};
+			root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			if(root_ctrl == NULL)
+			{
+				return EPDK_FAIL;
+			}
+			wifi_get_linkName(linkName);
+			if(!eLIBs_strlen(linkName))
+			{
+				return EPDK_FAIL;
+			}
+			if(exp_play_mode)
+			{
+				if(exp_play_mode->link_get_weather != gscene_hbar_wifi_link)
+				{
+					return EPDK_FAIL;
+				}
+			}
+			else
+			{
+				return EPDK_FAIL;
+			}
+			
+			if(root_ctrl->h_app_weather)
+			{
+				return EPDK_OK;
+			}
+			app_root_delete_all_app(root_ctrl);
+			gscene_hbar_set_state(HBAR_ST_HIDE);
+			root_ctrl->root_para->h_parent= GUI_WinGetParent(root_ctrl->h_app_home);
+			root_ctrl->h_app_weather =  app_weather_create(root_ctrl->root_para);
+			if(root_ctrl->h_app_weather == NULL)
+			{
+				app_home_restore(msg);
+			}
+			else
+			{
+				GUI_WinSetFocusChild(root_ctrl->h_app_weather);
+			}
+			return EPDK_OK;
+		}
+		case MSG_APP_WIFI:
+		{
+			root_ctrl_t *root_ctrl;
+			root_ctrl = (root_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			app_root_delete_all_app(root_ctrl);
+			root_ctrl->h_app_wifi= app_wifi_create(GUI_WinGetHandFromName(APP_ROOT));
+			if(NULL == root_ctrl->h_app_wifi)
+			{
+				__wrn("--wifi create fail---\n");
+				return EPDK_FAIL;
+			}
+			GUI_WinSetFocusChild(root_ctrl->h_app_wifi);
+			break;
+		}
+		default:
+			break;
+	}
+
+	return GUI_ManWinDefaultProc(msg);
+}
+
+
+H_WIN app_root_wincreate(Activity *activity)
+{
+	H_WIN	hManWin;
+	__gui_manwincreate_para_t   create_info;
+	eLIBs_memset(&create_info, 0, sizeof(__gui_manwincreate_para_t));
+	create_info.attr            	= activity;
+	create_info.hParent				= activity_get_root_win(activity);
+	create_info.hHosting 			= NULL;
+	create_info.ManWindowProc   	= (__pGUI_WIN_CB)esKRNL_GetCallBack((__pCBK_t)app_root_win_proc);
+	create_info.name            	= APP_ROOT;
+	hManWin 						= GUI_ManWinCreate(&create_info);
+	if(hManWin == NULL)
+	{
+		__wrn("home: create movie windows failed!\n");
+		return NULL;
+	}
+	return hManWin;
+}

@@ -1,0 +1,2540 @@
+/*
+**************************************************************************************************************
+*											         ePDK
+*						            the Easy Portable/Player Develop Kits
+*									           desktop system
+*
+*						        	 (c) Copyright 2007-2010, ANDY, China
+*											 All Rights Reserved
+*
+* File    	: app_movie.c
+* By      	: Bayden.chen
+* Func		: desk main thread
+* Version	: v1.0
+* ============================================================================================================
+* 2011-05-05   Bayden.chen  create this file, implements the fundemental interface;
+**************************************************************************************************************
+*/
+
+#include "app_movie.h"
+
+H_WIN app_movie_create(root_para_t *para)
+{
+	__gui_manwincreate_para_t create_info;
+	H_WIN hManWin;
+	eLIBs_memset(&create_info, 0, sizeof(__gui_manwincreate_para_t));
+	create_info.name            = APP_MOVIE;
+	create_info.hParent         = para->h_parent;
+	create_info.ManWindowProc   = (__pGUI_WIN_CB)esKRNL_GetCallBack((__pCBK_t)app_movie_proc);
+	create_info.attr            = (void *)para;
+	create_info.id				= APP_MOVIE_ID;
+	create_info.hHosting        = NULL;
+	hManWin = GUI_ManWinCreate(&create_info);
+	Funprintf("--movie root_type = %d--\n\n",para->root_type);
+	if(hManWin)
+	{
+		reg_root_para_t *root_reg_para;
+		__s32 reg_storage_type;
+		reg_storage_type = 0;
+		if(para)
+		{
+			if(RAT_TF == para->root_type)
+			{
+				reg_storage_type = 0;
+			}
+			else if(RAT_USB == para->root_type)
+			{
+				reg_storage_type = 1;
+			}
+			else
+			{
+				__wrn("para->root_para->root_type invalid...\n");
+			}
+		}
+		root_reg_para = (reg_root_para_t *)dsk_reg_get_para_by_app(REG_APP_ROOT);
+		if(root_reg_para)
+		{
+			__s32 reg_app_type;
+			reg_app_type = m_eMediaTypeList_video;
+			root_reg_para->cur_play_storage = reg_storage_type;
+			root_reg_para->last_play_app = reg_app_type;
+			root_reg_para->last_app_play_storage[reg_app_type] = reg_storage_type;
+			root_reg_para->last_storage_play_app[reg_storage_type] = reg_app_type;
+		}
+		else
+		{
+			__wrn("para is null...\n");
+		}
+	}
+
+	return hManWin;
+}
+
+static __s32 movie_save_breakpoint_info(movie_ctrl_t *movie_ctrl)
+{
+	if(exp_play_mode->play_state == EXPLOROER_SW_TO_MOVIE)
+	{
+		return EPDK_OK;
+	}
+	__wrn("movie_save_breakpoint_info.............\n");
+	{
+		__s32 index;
+		index = robin_npl_get_cur();
+		__here__;
+
+		if(-1 != index)
+		{
+			__here__;
+			__movie_save_breakpoint_info(movie_ctrl, index);
+		}
+	}
+	__movie_save_last_playing_file(movie_ctrl);
+	dsk_reg_flush(REG_APP_MOVIE);
+	return EPDK_OK;
+}
+
+
+
+static H_LYR movie_32bpp_layer_create(RECT *rect, __s32 pipe)
+{
+	H_LYR layer = NULL;
+	FB  fb =
+	{
+		{0, 0},                                   		/* size      */
+		{0, 0, 0},                                      /* buffer    */
+		{FB_TYPE_RGB, {PIXEL_COLOR_ARGB8888, 0, (__rgb_seq_t)0}},    /* fmt       */
+	};
+	__disp_layer_para_t lstlyr =
+	{
+		DISP_LAYER_WORK_MODE_NORMAL,                    /* mode      */
+		0,                                              /* ck_mode   */
+		0,                                              /* alpha_en  */
+		0,                                              /* alpha_val */
+		1,                                              /* pipe      */
+		0xff,                                           /* prio      */
+		{0, 0, 0, 0},                           		/* screen    */
+		{0, 0, 0, 0},                               	/* source    */
+		DISP_LAYER_OUTPUT_CHN_DE_CH1,                   /* channel   */
+		NULL                                            /* fb        */
+	};
+	__layerwincreate_para_t lyrcreate_info =
+	{
+		"movie layer",
+		NULL,
+		GUI_LYRWIN_STA_SUSPEND,
+		GUI_LYRWIN_NORMAL
+	};
+	fb.size.width		= rect->width;
+	fb.size.height		= rect->height;
+	lstlyr.src_win.x  		= 0;
+	lstlyr.src_win.y  		= 0;
+	lstlyr.src_win.width 	= rect->width;
+	lstlyr.src_win.height 	= rect->height;
+	lstlyr.scn_win.x		= rect->x;
+	lstlyr.scn_win.y		= rect->y;
+	lstlyr.scn_win.width  	= rect->width;
+	lstlyr.scn_win.height 	= rect->height;
+	lstlyr.pipe = pipe;
+	lstlyr.fb = &fb;
+	lyrcreate_info.lyrpara = &lstlyr;
+	layer = GUI_LyrWinCreate(&lyrcreate_info);
+
+	if(!layer)
+	{
+		__wrn("GUI_LyrWinCreate fail... !\n");
+	}
+
+	return layer;
+}
+
+static __bool is_on_tv(void)
+{
+	__disp_output_type_t output;
+	
+	output = dsk_display_get_output_type();
+	if(DISP_OUTPUT_TYPE_LCD == output || DISP_OUTPUT_TYPE_NONE == output)
+	{
+		__wrn("not on tv now...\n");
+		return EPDK_FALSE;
+	}
+	else
+	{
+		__wrn("on tv now...\n");
+		return EPDK_TRUE;
+	}
+}
+
+static __s32 __movie_ctrl_para_init(movie_ctrl_t *movie_ctrl)
+{
+	if(!movie_ctrl)
+	{
+		__wrn("movie_ctrl is null...\n");
+		return EPDK_FAIL;
+	}
+
+	movie_ctrl->hdisp = eLIBs_fopen("b:\\DISP\\DISPLAY", "r");
+
+	if(!movie_ctrl->hdisp)
+	{
+		__msg("open disp fail...\n");
+	}
+
+	rat_stop_miniature_decode();
+
+	__msg("open disp success...\n");
+	{
+		__s32 ret;
+		__s32 screen_width, screen_height;
+		RECT vedio_rect;
+		robin_open_arg_t arg;
+		arg.cedar_stop_mode = CEDAR_STOP_MODE_KEEP_PLUGINS;
+		arg.switch_vplay_mode = CEDAR_FILE_SWITCH_VPLY_MODE_SEAMLESS;
+		arg.reserve_mem_size = 1024 * 1024;	//512*1024;
+		ret = robin_open(ROBIN_MODE_VIDEO_MAX, &arg);
+		if(EPDK_OK != ret)
+		{
+			__msg("robin_open fail...\n");
+			return EPDK_FAIL;
+		}
+
+		__msg("robin_open success...\n");
+		dsk_display_get_size(&screen_width, &screen_height);
+		vedio_rect.x = 0;
+		vedio_rect.y = 0;
+		vedio_rect.width = screen_width;
+		vedio_rect.height = screen_height;
+		__msg("vedio screen=%d %d %d %d", vedio_rect.x, vedio_rect.y, vedio_rect.width, vedio_rect.height);
+		movie_ctrl->hvedio_lyr = robin_request_video_layer(&vedio_rect, 0, 0xff);
+
+		if(!movie_ctrl->hvedio_lyr)
+		{
+			__msg("robin_request_vedio_layer fail...\n");
+			return EPDK_FAIL;
+		}
+
+		__msg("robin_request_vedio_layer success...\n");
+	}
+	if(is_on_tv())
+	{
+		__u32 arg[3] = {0};
+		arg[0] = movie_ctrl->hvedio_lyr;
+		eLIBs_fioctrl(movie_ctrl->hdisp, DISP_CMD_VIDEO_START, 0, (void *)arg);
+	}
+
+	{
+		__s32 ret;
+		__u32 arg[3] = {0};
+		arg[0] = movie_ctrl->hvedio_lyr;
+		ret = eLIBs_fioctrl(movie_ctrl->hdisp, DISP_CMD_LAYER_BOTTOM, 0, (void *)arg);
+
+		if(0 != ret)
+		{
+			__msg("DISP_CMD_LAYER_BOTTOM fail...\n");
+		}
+		else
+		{
+			__msg("DISP_CMD_LAYER_BOTTOM success...\n");
+		}
+	}
+
+	movie_ctrl->auto_play_timmer_id = 0x10;
+	movie_ctrl->auto_flush_timmer_id = 0x31;
+	movie_ctrl->err_cnt             = 0;
+	movie_ctrl->rr_flag             = 0;
+	movie_ctrl->stop_cnt            = 2;
+	movie_ctrl->cur_stop_cnt        = 0;
+	movie_ctrl->cur_time            = 0;
+	movie_ctrl->btv_out             = 0;
+	eLIBs_memset(movie_ctrl->cur_playing_file, 0, sizeof(movie_ctrl->cur_playing_file));
+	movie_ctrl->quit_by_fs_part_plug_out    = EPDK_FALSE;
+	__msg("__movie_para_init success...\n");
+	return EPDK_OK;
+}
+
+static __s32 __movie_ctrl_para_deinit(movie_ctrl_t *movie_ctrl)
+{
+	if(!movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+
+	if(is_on_tv())
+	{
+		__u32 arg[3] = {0};
+		arg[0] = movie_ctrl->hvedio_lyr;
+		eLIBs_fioctrl(movie_ctrl->hdisp, DISP_CMD_VIDEO_STOP, 0, (void *)arg);
+	}
+
+	if(movie_ctrl->hvedio_lyr)
+	{
+		robin_release_video_layer(movie_ctrl->hvedio_lyr);
+		movie_ctrl->hvedio_lyr = NULL;
+	}
+
+	if(movie_ctrl->hdisp)
+	{
+		eLIBs_fclose(movie_ctrl->hdisp);
+		movie_ctrl->hdisp = NULL;
+	}
+
+	return EPDK_OK;
+}
+
+static __s32 __movie_install_auto_play_timmer(movie_ctrl_t *movie_ctrl)
+{
+	if(!movie_ctrl)
+	{
+		__wrn("--nvalid para--\n");
+		return EPDK_FAIL;
+	}
+	if(!GUI_IsTimerInstalled(movie_ctrl->movie_manager, movie_ctrl->auto_play_timmer_id))
+	{
+		GUI_SetTimer(movie_ctrl->movie_manager, movie_ctrl->auto_play_timmer_id,200,NULL);//0.5秒
+	}
+	if(!GUI_IsTimerInstalled(movie_ctrl->movie_manager, movie_ctrl->auto_flush_timmer_id))
+	{
+		GUI_SetTimer(movie_ctrl->movie_manager, movie_ctrl->auto_flush_timmer_id, MOVIE_AUTO_FLUSH_FIRST_TIME, NULL);
+	}
+	else
+	{
+		GUI_ResetTimer(movie_ctrl->movie_manager, movie_ctrl->auto_flush_timmer_id,MOVIE_AUTO_FLUSH_FIRST_TIME, NULL);
+	}
+	return EPDK_OK;
+}
+
+
+static __s32 __movie_reset_auto_play_timmer(movie_ctrl_t *movie_ctrl)
+{
+	if(!movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	if(GUI_IsTimerInstalled(movie_ctrl->movie_manager, movie_ctrl->auto_play_timmer_id))
+	{
+		GUI_ResetTimer(movie_ctrl->movie_manager, movie_ctrl->auto_play_timmer_id, 200, NULL);
+	}
+	else
+	{
+		return EPDK_FAIL;
+	}
+	return EPDK_OK;
+}
+
+static __s32 __movie_uninstall_auto_play_timmer(movie_ctrl_t *movie_ctrl)
+{
+	if(!movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+
+	if(GUI_IsTimerInstalled(movie_ctrl->movie_manager, movie_ctrl->auto_play_timmer_id))
+	{
+		GUI_KillTimer(movie_ctrl->movie_manager, movie_ctrl->auto_play_timmer_id);
+	}
+
+#if MOVIE_AUTO_FLUSH_TIME
+
+	if(GUI_IsTimerInstalled(movie_ctrl->movie_manager, movie_ctrl->auto_flush_timmer_id))
+	{
+		GUI_KillTimer(movie_ctrl->movie_manager, movie_ctrl->auto_flush_timmer_id);
+	}
+
+#endif
+	if(GUI_IsTimerInstalled(movie_ctrl->movie_manager,MOVE_LYR_TIMERID))
+	{
+		GUI_KillTimer(movie_ctrl->movie_manager,MOVE_LYR_TIMERID);
+	}	
+
+	return EPDK_OK;
+}
+
+static __s32 __movie_load_breakpoint_info(__s32 index, __cedar_tag_inf_t *tag_inf)
+{
+	__s32 ret;
+	char filename[RAT_MAX_FULL_PATH_LEN] = {0};
+	ret = robin_npl_index2file(index, filename);
+
+	if(-1 == ret)
+	{
+		__msg("robin_npl_index2file fail...\n");
+		return -1;
+	}
+
+	__here__;
+
+	if(!fifo_db_has_exist(NAME_MOVIE_BKPOINT))
+	{
+		return -1;
+	}
+
+	__here__;
+
+	if(get_item_content_from_fifo_db(NAME_MOVIE_BKPOINT, filename, tag_inf))
+	{
+		return -1;
+	}
+
+	__here__;
+	return 0;
+}
+
+static __s32 __movie_make_tag(movie_ctrl_t *movie_ctrl, __cedar_tag_inf_t *tag_inf)
+{
+	char cur_playing_file[RAT_MAX_FULL_PATH_LEN + 1] = {0};
+
+	if(!movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+
+	if(!tag_inf)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+
+	cur_playing_file[0] = 0;
+	robin_get_fsm_cur_file(cur_playing_file, sizeof(cur_playing_file));
+	__msg("cur_playing_file=%s\n", cur_playing_file);
+	__msg("movie_ctrl->cur_playing_file=%s\n", movie_ctrl->cur_playing_file);
+
+	if(0 == eLIBs_strcmp(cur_playing_file, movie_ctrl->cur_playing_file))
+	{
+		eLIBs_memset(tag_inf, 0, sizeof(__cedar_tag_inf_t));
+		eLIBs_strncpy(tag_inf->tag_magic, "VTAG", 4);
+		tag_inf->time_offset = movie_ctrl->cur_time;
+		__msg("tag_inf->time_offset=%d\n", tag_inf->time_offset);
+	}
+	else
+	{
+		__here__;
+		movie_ctrl->cur_time = 0;
+		return EPDK_FAIL;
+	}
+
+	return EPDK_OK;
+}
+
+static __s32 __movie_save_breakpoint_info(movie_ctrl_t *movie_ctrl, __s32 index)
+{
+	__cedar_tag_inf_t tag_inf;
+	char filename[RAT_MAX_FULL_PATH_LEN] = {0};
+	__s32 ret;
+	__cedar_status_t  fsm_sta;
+
+	if(!movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+
+	fsm_sta = robin_get_fsm_status();
+	__msg("fsm_sta=%d\n", fsm_sta);
+	/*get the tag*/
+	ret = robin_get_tag(&tag_inf);
+	__msg("robin_get_tag, ret = %d\n", ret);
+
+	if(0 != ret) //如果视频库获取断点信息失败，则自造一个断点信息
+	{
+		__msg("robin_get_tag fail...\n");
+		return -1;
+
+		if(EPDK_TRUE == movie_ctrl->quit_by_fs_part_plug_out)
+		{
+			ret = __movie_make_tag(movie_ctrl, &tag_inf);
+			__msg("__movie_make_tag, ret = %d\n", ret);
+
+			if(0 != ret)
+			{
+				return -1;
+			}
+		}
+		else
+		{
+			return -1;
+		}
+	}
+
+	__here__;
+	ret = robin_npl_index2file(index, filename);
+
+	if(-1 == ret)
+	{
+		__msg("robin_npl_index2file fail...\n");
+		return -1;
+	}
+
+	__msg("begin save breakpoint, index = %d, filename=%s\n", index, filename);
+
+	if(!fifo_db_has_exist(NAME_MOVIE_BKPOINT))
+	{
+		ret = create_fifo_db(NAME_MOVIE_BKPOINT, 4, sizeof(__cedar_tag_inf_t));
+
+		if(0 != ret)
+		{
+			__msg("create_fifo_db fail...\n");
+			return -1;
+		}
+	}
+
+	__here__;
+	ret = add_item_to_fifo_db(NAME_MOVIE_BKPOINT, filename, &tag_inf);
+	__msg("add_item_to_fifo_db, ret=%d\n", ret);
+	return ret;
+}
+
+static __s32 __movie_delete_breakpoint_info(movie_ctrl_t *movie_ctrl, __s32 index)
+{
+	__s32 ret;
+	char filename[RAT_MAX_FULL_PATH_LEN] = {0};
+	__cedar_tag_inf_t tag_inf;
+
+	if(!movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+
+	ret = robin_npl_index2file(index, filename);
+
+	if(-1 == ret)
+	{
+		__msg("robin_npl_index2file fail...\n");
+		return -1;
+	}
+
+	if(!fifo_db_has_exist(NAME_MOVIE_BKPOINT))
+	{
+		return -1;
+	}
+
+	ret = get_item_content_from_fifo_db(NAME_MOVIE_BKPOINT, filename, &tag_inf);
+
+	if(-1 == ret)
+	{
+		return 0;
+	}
+
+	if(delete_item_from_fifo_db(NAME_MOVIE_BKPOINT, filename))
+	{
+		return -1;
+	}
+
+	return 0;
+}
+
+static __s32 __movie_play_file(movie_ctrl_t *movie_ctrl, __s32 index, __bool breakplay)
+{
+	__s32 ret;
+	char filename[RAT_MAX_FULL_PATH_LEN] = {0};
+	__cedar_tag_inf_t tag_inf;
+	ret = robin_npl_index2file(index, filename);
+	if(-1 == ret)
+	{
+		__msg("robin_npl_index2file fail...\n");
+		return EPDK_FAIL;
+	}
+	
+	if(EPDK_TRUE == breakplay)
+	{
+		ret = __movie_load_breakpoint_info(index, &tag_inf);
+		if(0 == ret)
+		{
+			robin_set_cmd_stop();
+			ret = robin_play_file(filename, &tag_inf);
+			if(EPDK_FAIL == ret)
+			{
+				return EPDK_FAIL;
+			}
+
+			robin_set_cmd_play();
+		}
+		else
+		{
+			robin_set_cmd_stop();
+			ret = robin_play_file(filename, NULL);
+			if(EPDK_FAIL == ret)
+			{
+				return EPDK_FAIL;
+			}
+			robin_set_cmd_play();
+		}
+	}
+	else
+	{
+		robin_set_cmd_stop();
+		ret = robin_play_file(filename, NULL);
+		if(EPDK_FAIL == ret)
+		{
+			return EPDK_FAIL;
+		}
+		robin_set_cmd_play();
+	}
+
+	if(EPDK_OK == ret)
+	{
+		__movie_install_auto_play_timmer(movie_ctrl);
+	}
+	return ret;
+}
+
+__s32 __movie_play_random(movie_ctrl_t *movie_ctrl)
+{
+	__s32 ret;
+	rat_play_mode_e playMode = robin_get_play_mode();
+
+	if(playMode != RAT_PLAY_MODE_RANDOM)
+	{
+		return EPDK_FAIL;
+	}
+
+	if(1 == movie_ctrl->rr_flag)
+	{
+		__s32 index;
+		index = robin_npl_get_cur();
+		__msg("index=%d\n", index);
+
+		if(-1 != index)
+		{
+			__movie_play_file(movie_ctrl, index, EPDK_FALSE);
+		}
+
+		//movie_ctrl->rr_flag = 0;
+	}
+	else
+	{
+		ret = __movie_auto_play_next(movie_ctrl);
+		__msg("ret=%d\n", ret);
+
+		if(EPDK_OK != ret) //播放完毕,退出应用
+		{
+			movie_playend_scene_create(movie_ctrl);
+			esKRNL_TimeDly(100);
+			__movie_exit_movie(movie_ctrl, 0);
+		}
+		else
+		{
+		}
+	}
+
+	return EPDK_OK;
+}
+
+static __s32 __movie_play_next(movie_ctrl_t *movie_ctrl)
+{
+	__s32 ret;
+	__s32 index;
+	__s32 total;
+
+	if(__movie_play_random(movie_ctrl) == EPDK_OK)
+	{
+		return EPDK_OK;
+	}
+
+	index = robin_npl_get_cur();
+
+	if(-1 == index)
+	{
+		__msg("robin_npl_get_cur fail...\n");
+		return EPDK_FAIL;
+	}
+
+	__movie_delete_breakpoint_info(movie_ctrl, index);
+	total = robin_npl_get_total_count();
+
+	if(-1 == total)
+	{
+		__msg("robin_npl_get_total_count fail...\n");
+		return EPDK_FAIL;
+	}
+
+	index++;
+
+	if(index >= total)
+	{
+		index = 0;
+	}
+
+	robin_npl_set_cur(index);
+	robin_set_cmd_stop();
+	app_root_play_app_sounds(SHORT_KEY_WAVE_FILE_NEXT);
+	ret = __movie_play_file(movie_ctrl, index, EPDK_FALSE);
+
+	if(EPDK_OK == ret)
+	{
+		//movie_save_breakpoint_info(movie_ctrl);
+	}
+	return ret;
+}
+
+static __s32 __movie_play_prev(movie_ctrl_t *movie_ctrl)
+{
+	__s32 ret;
+	__s32 index;
+	__s32 total;
+
+	if(__movie_play_random(movie_ctrl) == EPDK_OK)
+	{
+		return EPDK_OK;
+	}
+
+	index = robin_npl_get_cur();
+
+	if(-1 == index)
+	{
+		__msg("robin_npl_get_cur fail...\n");
+		return EPDK_FAIL;
+	}
+
+	total = robin_npl_get_total_count();
+
+	if(-1 == total)
+	{
+		__msg("robin_npl_get_total_count fail...\n");
+		return EPDK_FAIL;
+	}
+
+	index--;
+
+	if(index < 0)
+	{
+		index = total - 1;
+	}
+
+	if(index < 0)
+	{
+		__msg("total movie count = 0\n");
+		index = 0;
+	}
+
+	robin_npl_set_cur(index);
+	robin_set_cmd_stop();
+	app_root_play_app_sounds(SHORT_KEY_WAVE_FILE_PREV);
+	ret = __movie_play_file(movie_ctrl, index, EPDK_FALSE);
+
+	if(EPDK_OK == ret)
+	{
+		//movie_save_breakpoint_info(movie_ctrl);
+	}
+	return ret;
+}
+
+static __s32 __movie_cur_file_has_breakpoint(void)
+{
+	__s32 ret;
+	__s32 index;
+	__cedar_tag_inf_t tag_inf;
+	index = robin_npl_get_cur();
+
+	if(-1 == index)
+	{
+		__msg("robin_npl_get_cur fail...\n");
+		return EPDK_FALSE;
+	}
+
+	__msg("before __movie_load_breakpoint_info\n");
+	ret = __movie_load_breakpoint_info(index, &tag_inf);
+
+	if(0 == ret)
+	{
+		return EPDK_TRUE;
+	}
+	else
+	{
+		return EPDK_FALSE;
+	}
+}
+
+static __s32 __movie_start_play(movie_ctrl_t *movie_ctrl, __bool breakplay)
+{
+	__s32 ret;
+	__s32 index;
+	index = robin_npl_get_cur();
+
+	if(-1 == index)
+	{
+		__msg("robin_npl_get_cur fail...\n");
+		return EPDK_FAIL;
+	}
+
+	ret = __movie_play_file(movie_ctrl, index, breakplay);
+	return ret;
+}
+
+static __s32 __movie_auto_play_next(movie_ctrl_t *movie_ctrl)
+{
+	__s32 index;
+	index = robin_npl_get_cur();
+	if(-1 != index)
+	{
+		__movie_delete_breakpoint_info(movie_ctrl, index);
+	}
+	index = robin_npl_get_next();
+	if(-1 == index)
+	{
+		__wrn("robin_npl_get_cur fail...\n");
+		return EPDK_FAIL;
+	}
+	__movie_play_file(movie_ctrl,index, EPDK_FALSE);	
+	return EPDK_OK;
+}
+
+
+static __s32 __movie_stop_play(movie_ctrl_t *movie_ctrl)
+{
+	robin_set_cmd_stop();
+	return EPDK_OK;
+}
+
+static __s32 __movie_pause_play(movie_ctrl_t *movie_ctrl)
+{
+	robin_set_cmd_pause();
+	return EPDK_OK;
+}
+
+
+//flag:0表示退出到explorer，1表示退出到home
+static __s32 __movie_exit_movie(movie_ctrl_t *movie_ctrl, __s32 flag)
+{
+	__msg("before __movie_exit_movie\n");
+	if(!movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	if(movie_ctrl->exit_movie)
+	{
+		__msg("movie already exit...\n");
+		return EPDK_FAIL;
+	}
+	movie_ctrl->exit_movie = 1;
+	if(!movie_ctrl->movie_manager)
+	{
+		__wrn("movie_ctrl->movie_manager is null...\n");
+		return EPDK_FAIL;
+	}
+	__movie_uninstall_auto_play_timmer(movie_ctrl);
+	{
+		__gui_msg_t msg;
+		eLIBs_memset(&msg, 0, sizeof(__gui_msg_t));
+		msg.id = GUI_MSG_CLOSE;
+		msg.dwAddData1 = flag;
+		msg.h_deswin = movie_ctrl->movie_manager;
+		GUI_SendMessage(&msg);
+	}
+	__msg("after __movie_exit_movie\n");
+	return EPDK_OK;
+}
+
+static __s32 __movie_check_for_play_err(movie_ctrl_t *movie_ctrl)
+{
+	__s32 ret;
+	ret = robin_get_feedback_msg();
+	if(ret < 0)
+	{
+		robin_clear_feedback_msgQ();
+		movie_delete_subscene_by_id(movie_ctrl, MOVIE_SUB_SCENE_TYPE_ALL & (~MOVIE_SUB_SHOW_ID));
+		movie_playerror_scene_create(movie_ctrl);
+		esKRNL_TimeDly(100);
+		__movie_playerror_scene_delete(movie_ctrl);
+		movie_ctrl->err_cnt++;
+		if(movie_ctrl->err_cnt >= robin_npl_get_total_count()|| RAT_PLAY_MODE_ROTATE_ONE == robin_get_play_mode())
+		{
+			__movie_exit_movie(movie_ctrl, 0);
+		}
+		return EPDK_FAIL;
+	}
+	return EPDK_OK;
+}
+
+static __s32 __movie_check_for_auto_play(movie_ctrl_t *movie_ctrl)
+{
+	__cedar_status_t fsm_sta;
+	__s32 ret;
+	if(!movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	fsm_sta = robin_get_fsm_status();
+	if(CEDAR_STAT_PLAY == fsm_sta|| CEDAR_STAT_PAUSE == fsm_sta)
+	{
+		movie_ctrl->cur_time = robin_get_cur_time();
+		robin_get_fsm_cur_file(movie_ctrl->cur_playing_file, sizeof(movie_ctrl->cur_playing_file));
+	}
+	else
+	{
+		movie_ctrl->cur_time = -1;
+		eLIBs_strcpy(movie_ctrl->cur_playing_file, "");
+	}
+	switch(fsm_sta)
+	{
+		case CEDAR_STAT_STOP:
+		{
+			movie_ctrl->cur_stop_cnt++;
+			if(movie_ctrl->cur_stop_cnt < movie_ctrl->stop_cnt)
+			{
+				break;
+			}
+			movie_ctrl->cur_stop_cnt = 0;
+			if(exp_play_mode->play_state == EXPLOROER_SW_TO_MOVIE)
+			{
+				movie_cmd2parent(movie_ctrl->h_deswin, SWITCH_TO_EXPLORER, 0, 0);
+				return EPDK_OK;
+			}
+			if(1 == movie_ctrl->rr_flag)
+			{
+				__s32 index;
+				index = robin_npl_get_cur();
+				if(-1 != index)
+				{
+					__movie_play_file(movie_ctrl, index, EPDK_FALSE);
+				}
+
+			}
+			else
+			{
+				ret = __movie_auto_play_next(movie_ctrl);
+				if(EPDK_OK != ret) 
+				{
+					movie_playend_scene_create(movie_ctrl);
+					esKRNL_TimeDly(100);
+					__movie_exit_movie(movie_ctrl, 0);
+				}
+			}
+			break;
+		}
+		case CEDAR_STAT_PLAY:
+		{
+			movie_ctrl->rr_flag = 0;
+			movie_ctrl->err_cnt = 0;
+			break;
+		}
+		case CEDAR_STAT_RR:
+		{
+			movie_ctrl->rr_flag = 1;
+			break;
+		}
+		default:
+		{
+			movie_ctrl->rr_flag = 0;
+			break;
+		}
+	}
+	return EPDK_OK;
+}
+
+static __s32 __movie_spsc_scene_create(movie_ctrl_t *movie_ctrl)
+{
+	movie_spsc_create_para_t create_para;
+	if(NULL == movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	eLIBs_memset(&create_para, 0, sizeof(movie_spsc_create_para_t));
+	create_para.hparent = movie_ctrl->movie_manager;
+	create_para.scene_id = MOVIE_SPSC_ID;
+	movie_ctrl->spsc_scene = movie_spsc_scene_create(&create_para);
+	if(NULL == movie_ctrl->spsc_scene)
+	{
+		__wrn("movie_spsc_scene_create fail...\n");
+		return EPDK_FAIL;
+	}
+	process_state = 1;
+	return EPDK_OK;
+}
+static __s32 __movie_spsc_scene_delete(movie_ctrl_t *movie_ctrl)
+{
+	__s32 ret;
+	if(NULL == movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	if(movie_ctrl->spsc_scene)
+	{
+		movie_spsc_scene_delete(movie_ctrl->spsc_scene);
+		movie_ctrl->spsc_scene = NULL;
+	}
+	process_state = 0;
+	return EPDK_OK;
+}
+
+static __s32 __movie_sub_show_scene_create(movie_ctrl_t *movie_ctrl)
+{
+	__s32 ret;
+
+	if(NULL == movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+
+	{
+		movie_sub_show_create_para_t create_para;
+		eLIBs_memset(&create_para, 0, sizeof(movie_sub_show_create_para_t));
+		create_para.hparent  = movie_ctrl->movie_manager;
+		create_para.scene_id = MOVIE_SUB_SHOW_ID;
+		create_para.sub_pos  = movie_ctrl->sub_pos;
+		create_para.sub_color = movie_ctrl->sub_color;
+		create_para.sub_size = movie_ctrl->sub_size;
+		movie_ctrl->sub_show_scene = movie_sub_show_scene_create(&create_para);
+
+		if(NULL == movie_ctrl->sub_show_scene)
+		{
+			__msg("movie_sub_show_scene_create fail...\n");
+			return EPDK_FAIL;
+		}
+	}
+
+	return EPDK_OK;
+}
+
+static __s32 __movie_sub_show_scene_delete(movie_ctrl_t *movie_ctrl)
+{
+	__s32 ret;
+
+	if(NULL == movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+
+	{
+		if(movie_ctrl->sub_show_scene)
+		{
+			movie_sub_show_scene_delete(movie_ctrl->sub_show_scene);
+			movie_ctrl->sub_show_scene = NULL;
+		}
+	}
+
+	return EPDK_OK;
+}
+static __s32 __movie_breakplay_scene_create(movie_ctrl_t *movie_ctrl)
+{
+	__s32 ret;
+
+	if(NULL == movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+
+	{
+		if(NULL == movie_ctrl->breakplay_scene)
+		{
+			__s32 lang_id[] = {STRING_MOVIE_TIPS, STRING_MOVIE_BREAKPLAY};
+			default_dialog(movie_ctrl->breakplay_scene, movie_ctrl->movie_manager, MOVIE_BREAKPLAY_DIALOG_ID, ADLG_YESNO, lang_id);
+		}
+
+		//movie_ctrl->breakplay_scene = create_breakplay_dlg();
+		if(NULL == movie_ctrl->breakplay_scene)
+		{
+			__msg("default_dialog fail...\n");
+			return EPDK_FAIL;
+		}
+		else
+		{
+			if(!GUI_IsTimerInstalled(movie_ctrl->movie_manager, movie_ctrl->auto_play_timmer_id))
+			{
+				GUI_SetTimer(movie_ctrl->movie_manager, movie_ctrl->auto_play_timmer_id
+				             , 500, NULL);//0.5秒
+			}
+		}
+	}
+
+	return EPDK_OK;
+}
+
+static __s32 __movie_breakplay_scene_delete(movie_ctrl_t *movie_ctrl)
+{
+	__s32 ret;
+
+	if(NULL == movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+
+	{
+		if(movie_ctrl->breakplay_scene)
+		{
+			app_dialog_destroy(movie_ctrl->breakplay_scene);
+			movie_ctrl->breakplay_scene = NULL;
+		}
+	}
+
+	return EPDK_OK;
+}
+
+static __s32 movie_playerror_scene_create(movie_ctrl_t *movie_ctrl)
+{
+	__s32 ret;
+	if(NULL == movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	if(NULL == movie_ctrl->playerror_scene)
+	{
+		__s32 lang_id[] = {STRING_MOVIE_TIPS, STRING_MOVIE_FILE_NOT_SUPPORT};
+		default_dialog(movie_ctrl->playerror_scene, movie_ctrl->movie_manager, MOVIE_PLAYERROR_DIALOG_ID, ADLG_OK, lang_id);
+	}
+	if(NULL == movie_ctrl->playerror_scene)
+	{
+		__msg("default_dialog fail...\n");
+		return EPDK_FAIL;
+	}
+	return EPDK_OK;
+}
+
+static __s32 __movie_playerror_scene_delete(movie_ctrl_t *movie_ctrl)
+{
+	if(NULL == movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	if(movie_ctrl->playerror_scene)
+	{
+		app_dialog_destroy(movie_ctrl->playerror_scene);
+		movie_ctrl->playerror_scene = NULL;
+	}
+	return EPDK_OK;
+}
+
+static __s32 movie_playend_scene_create(movie_ctrl_t *movie_ctrl)
+{
+	__s32 ret;
+
+	if(NULL == movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+
+	{
+		if(NULL == movie_ctrl->playend_scene)
+		{
+			__s32 lang_id[] = {STRING_MOVIE_TIPS, STRING_MOVIE_PLAY_END};
+			default_dialog(movie_ctrl->playend_scene, movie_ctrl->movie_manager, MOVIE_PLAYEND_DIALOG_ID, ADLG_OK, lang_id);
+		}
+
+		if(NULL == movie_ctrl->playend_scene)
+		{
+			__msg("default_dialog fail...\n");
+			return EPDK_FAIL;
+		}
+	}
+
+	return EPDK_OK;
+}
+
+static __s32 __movie_playend_scene_delete(movie_ctrl_t *movie_ctrl)
+{
+	__s32 ret;
+
+	if(NULL == movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+
+	{
+		if(movie_ctrl->playend_scene)
+		{
+			app_dialog_destroy(movie_ctrl->playend_scene);
+			movie_ctrl->playend_scene = NULL;
+		}
+	}
+
+	return EPDK_OK;
+}
+
+//判断movie manwin是否有指定的子场景之一
+static __s32 movie_has_sub_scene(movie_ctrl_t *movie_ctrl, __u32 sub_id)
+{
+	H_WIN child;
+	char  winname[256];
+	__u32 child_id;
+
+	if(NULL == movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FALSE;
+	}
+
+	if(!movie_ctrl->movie_manager)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FALSE;
+	}
+
+	child = GUI_WinGetFirstChild(movie_ctrl->movie_manager);
+
+	while(child != NULL)
+	{
+		child_id = GUI_WinGetItemId(child);
+
+		if((child_id & sub_id))
+		{
+			return EPDK_TRUE;
+		}
+
+		child = GUI_WinGetNextBro(child);
+	}
+
+	return EPDK_FALSE;
+}
+
+//删除movie的子场景
+static __s32 movie_delete_subscene_by_id(movie_ctrl_t *movie_ctrl, __u32 sub_id)
+{
+	H_WIN child, next_child;
+	char  winname[256];
+	__u32 child_id;
+
+	if(NULL == movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+
+	if(!movie_ctrl->movie_manager)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+
+	child = GUI_WinGetFirstChild(movie_ctrl->movie_manager);
+
+	while(child != NULL)
+	{
+		eLIBs_memset(winname, 0, 256);
+		GUI_WinGetName(child, winname);
+		next_child = GUI_WinGetNextBro(child);
+		child_id = GUI_WinGetItemId(child);
+
+		if((child_id & sub_id)) //需要删除
+		{
+			__msg("begin delete movie sub scene, winname = %s \n", winname);
+
+			switch(child_id)
+			{
+				case MOVIE_SPSC_ID:
+				{
+					Funprintf("--here--\n");
+					__movie_spsc_scene_delete(movie_ctrl);
+					break;
+				}
+				case MOVIE_SUB_SHOW_ID:
+				{
+					__movie_sub_show_scene_delete(movie_ctrl);
+					break;
+				}
+				case MOVIE_PROG_ID:
+				{
+					Funprintf("--here--\n");
+					break;
+				}
+
+				case MOVIE_BREAKPLAY_DIALOG_ID:
+				{
+					__movie_breakplay_scene_delete(movie_ctrl);
+					break;
+				}
+
+				case MOVIE_PLAYERROR_DIALOG_ID:
+				{
+					__movie_playerror_scene_delete(movie_ctrl);
+					break;
+				}
+
+				case MOVIE_PLAYEND_DIALOG_ID:
+				{
+					__movie_playend_scene_delete(movie_ctrl);
+					break;
+				}
+
+				default:
+				{
+					__wrn("unknown child id, child_id=%d\n", child_id);
+					return EPDK_FAIL;
+				}
+			}
+		}
+
+		child = next_child;
+	}
+
+	return EPDK_OK;
+}
+
+static __s32 __movie_delete_scene_berore_switch_tv(movie_ctrl_t *movie_ctrl)
+{
+	//删除场景和部分资源
+	__here__;
+	__movie_uninstall_auto_play_timmer(movie_ctrl);
+	{
+		//save breakpoint
+		__s32 index;
+		index = robin_npl_get_cur();
+		__here__;
+
+		if(-1 != index)
+		{
+			__here__;
+			__movie_save_breakpoint_info(movie_ctrl, index);
+		}
+	}
+	__here__;
+	__movie_stop_play(movie_ctrl);
+	__here__;
+	movie_delete_subscene_by_id(movie_ctrl, MOVIE_SUB_SCENE_TYPE_ALL);
+	__here__;
+	__movie_ctrl_para_deinit(movie_ctrl);
+	robin_close();
+	
+	return EPDK_OK;
+}
+
+static __s32 __movie_create_scene_after_switch_tv(movie_ctrl_t *movie_ctrl)
+{
+	//创建部分场景和资源
+	__movie_ctrl_para_init(movie_ctrl);
+	app_movie_reg_para_init(movie_ctrl);
+	__movie_start_play(movie_ctrl, EPDK_TRUE);
+
+	if(1 == movie_ctrl->sub_state)
+	{
+		__movie_sub_show_scene_create(movie_ctrl);
+	}
+
+	__movie_install_auto_play_timmer(movie_ctrl);
+	return EPDK_OK;
+}
+
+static __s32 __movie_switch_output(movie_ctrl_t *movie_ctrl)
+{
+	//切换输出
+	{
+		reg_system_para_t *para;
+		para = (reg_system_para_t *)dsk_reg_get_para_by_app(REG_APP_SYSTEM);
+
+		if(para)
+		{
+			__msg("para->pal_ntsc = %d\n", para->pal_ntsc);
+
+			if(0 == para->pal_ntsc)
+			{
+				if(para->output == LION_DISP_LCD)
+				{
+					movie_ctrl->btv_out = 1;
+					__here__;
+					g_is_on_tv = 1;
+					g_display_switch_output(LION_DISP_TV_NTSC);
+				}
+				else
+				{
+					movie_ctrl->btv_out = 0;
+					__here__;
+					g_is_on_tv = 0;
+					g_display_switch_output(LION_DISP_LCD);
+				}
+			}
+			else
+			{
+				if(para->output == LION_DISP_LCD)
+				{
+					movie_ctrl->btv_out = 1;
+					__here__;
+					g_is_on_tv = 1;
+					g_display_switch_output(LION_DISP_TV_PAL);
+				}
+				else
+				{
+					movie_ctrl->btv_out = 0;
+					__here__;
+					g_is_on_tv = 0;
+					g_display_switch_output(LION_DISP_LCD);
+				}
+			}
+		}
+	}
+	__wrn("movie_ctrl->btv_out=%d\n", movie_ctrl->btv_out);
+	return EPDK_OK;
+}
+
+static __s32 __movie_switch_to_tv_or_lcd(movie_ctrl_t *movie_ctrl)
+{
+	__movie_delete_scene_berore_switch_tv(movie_ctrl);
+	__movie_switch_output(movie_ctrl);
+	__movie_create_scene_after_switch_tv(movie_ctrl);
+	return EPDK_OK;
+}
+
+static __s32 __spsc_scene_cmd_proc(movie_ctrl_t *movie_ctrl, __s32 msg_id, __s32 dwAddData2)
+{
+	switch(msg_id)
+	{
+		case spsc_scene_msg_timeout:
+		{
+			__s32 ret;
+			__msg("spsc_scene_msg_timeout\n");
+			movie_delete_subscene_by_id(movie_ctrl, MOVIE_SUB_SCENE_TYPE_ALL & (~MOVIE_SUB_SHOW_ID));
+			return EPDK_OK;
+		}
+		case spsc_scene_msg_tvout:
+		{
+			__msg("before __movie_switch_to_tv_or_lcd\n");
+			__movie_switch_to_tv_or_lcd(movie_ctrl);
+			__msg("after __movie_switch_to_tv_or_lcd\n");
+			return EPDK_OK;
+		}
+
+		case spsc_scene_msg_rr:
+		{
+			movie_ctrl->rr_flag = 1;
+			return EPDK_OK;
+		}
+
+		case spsc_scene_msg_save_breakpoint_info:
+		{
+			movie_save_breakpoint_info(movie_ctrl);
+			return EPDK_OK;
+		}
+		case movie_scene_msg_timeout:
+		{
+			__s32 ret;
+			ret = movie_has_sub_scene(movie_ctrl, MOVIE_SPSC_ID);
+			if(EPDK_TRUE == ret)
+			{
+				__here__;
+				movie_delete_subscene_by_id(movie_ctrl, MOVIE_SUB_SCENE_TYPE_ALL & (~MOVIE_SUB_SHOW_ID));
+			}
+
+			return EPDK_OK;
+		}
+		case movie_scene_msg_exit:
+		{
+			__movie_exit_movie(movie_ctrl, 0);
+		}
+		return EPDK_OK;
+
+		default:
+		{
+			break;
+		}
+	}
+
+	return EPDK_FAIL;
+}
+static __s32 __movie_process_after_start_play(movie_ctrl_t *movie_ctrl)
+{
+	if(1 == movie_ctrl->sub_state)
+	{
+		__movie_sub_show_scene_create(movie_ctrl);
+	}
+	__movie_install_auto_play_timmer(movie_ctrl);
+	return EPDK_OK;
+}
+
+static __s32 __breakplay_scene_cmd_proc(movie_ctrl_t *movie_ctrl, __s32 msg_id, __s32 dwAddData2)
+{
+	switch(msg_id)
+	{
+		case ADLG_CMD_EXIT:
+		{
+			if(GUI_IsTimerInstalled(movie_ctrl->movie_manager, movie_ctrl->auto_play_timmer_id))
+			{
+				GUI_KillTimer(movie_ctrl->movie_manager, movie_ctrl->auto_play_timmer_id);
+			}
+
+			if(ADLG_IDYES == dwAddData2)//断点播放
+			{
+				movie_delete_subscene_by_id(movie_ctrl, MOVIE_SUB_SCENE_TYPE_ALL);
+				__movie_start_play(movie_ctrl, EPDK_TRUE);
+				__movie_process_after_start_play(movie_ctrl);
+				return EPDK_OK;
+			}
+			else//非断点播放
+			{
+				movie_delete_subscene_by_id(movie_ctrl, MOVIE_SUB_SCENE_TYPE_ALL);
+				__movie_start_play(movie_ctrl, EPDK_FALSE);
+				__movie_process_after_start_play(movie_ctrl);
+				return EPDK_OK;
+			}
+		}
+
+		default:
+		{
+			break;
+		}
+	}
+
+	return EPDK_FAIL;
+}
+static __s32 __movie_save_last_playing_file(movie_ctrl_t *movie_ctrl)
+{
+	__s32 index;
+	char file[RAT_MAX_FULL_PATH_LEN] = {0};
+	root_para_t *root_para;
+
+	if(NULL == movie_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+
+	root_para = (root_para_t *)GUI_WinGetAttr(movie_ctrl->movie_manager);
+	index = robin_npl_get_cur();
+
+	if(-1 != index)
+	{
+		__s32 ret;
+		ret = robin_npl_index2file(index, file);
+
+		if(EPDK_OK == ret)
+		{
+			ret = dsk_reg_save_cur_play_info(REG_APP_MOVIE, index,
+			                                 file, root_para->root_type);
+
+			if(EPDK_OK == ret)
+			{
+				__msg("dsk_reg_save_cur_play_info success,index=%d, file=%s, root=%d\n",
+				      index, file, root_para->root_type);
+				return EPDK_OK;
+			}
+			else
+			{
+				__msg("dsk_reg_save_cur_play_info fail...\n");
+				return EPDK_FAIL;
+			}
+		}
+		else
+		{
+			__msg("robin_npl_index2file fail...\n");
+			return EPDK_FAIL;
+		}
+	}
+
+	return EPDK_FAIL;
+}
+
+static void __app_movie_set_play_mode(void)
+{
+	reg_movie_para_t *para;
+
+	if(dsk_reg_get_app_restore_flag(REG_APP_MOVIE))
+	{
+		__msg("load default setting...\n");
+		para = (reg_movie_para_t *)dsk_reg_get_default_para_by_app(REG_APP_MOVIE);
+	}
+	else
+	{
+		__msg("load current setting...\n");
+		para = (reg_movie_para_t *)dsk_reg_get_para_by_app(REG_APP_MOVIE);
+	}
+
+	if(para)
+	{
+		robin_set_play_mode(para->rotate_mode);
+		__msg("para->rotate_mode=%d\n", para->rotate_mode);
+	}
+	else
+	{
+		robin_set_play_mode(RAT_PLAY_MODE_ROTATE_ALL);
+	}
+}
+
+static void __app_movie_set_zoom_mode(void)
+{
+	reg_movie_para_t *para;
+
+	if(dsk_reg_get_app_restore_flag(REG_APP_MOVIE))
+	{
+		__msg("load default setting...\n");
+		para = (reg_movie_para_t *)dsk_reg_get_default_para_by_app(REG_APP_MOVIE);
+	}
+	else
+	{
+		__msg("load current setting...\n");
+		para = (reg_movie_para_t *)dsk_reg_get_para_by_app(REG_APP_MOVIE);
+	}
+
+	if(para)
+	{
+		robin_set_zoom(para->zoom_mode);
+		__msg("para->zoom_mode=%d\n", para->zoom_mode);
+	}
+}
+
+static __u32 __app_movie_get_sub_show_state(void)
+{
+	reg_movie_para_t *para;
+
+	if(dsk_reg_get_app_restore_flag(REG_APP_MOVIE))
+	{
+		__msg("load default setting...\n");
+		para = (reg_movie_para_t *)dsk_reg_get_default_para_by_app(REG_APP_MOVIE);
+	}
+	else
+	{
+		__msg("load current setting...\n");
+		para = (reg_movie_para_t *)dsk_reg_get_para_by_app(REG_APP_MOVIE);
+	}
+
+	if(para)
+	{
+		__msg("para->sub_state=%d\n", para->sub_state);
+		return para->sub_state;
+	}
+	else
+	{
+		return 1;
+	}
+}
+
+static __u32 __app_movie_get_sub_stream_index(void)
+{
+	reg_movie_para_t *para;
+
+	if(dsk_reg_get_app_restore_flag(REG_APP_MOVIE))
+	{
+		__msg("load default setting...\n");
+		para = (reg_movie_para_t *)dsk_reg_get_default_para_by_app(REG_APP_MOVIE);
+	}
+	else
+	{
+		__msg("load current setting...\n");
+		para = (reg_movie_para_t *)dsk_reg_get_para_by_app(REG_APP_MOVIE);
+	}
+
+	if(para)
+	{
+		__msg("para->sub_stream=%d\n", para->sub_stream);
+		return para->sub_stream;
+	}
+	else
+	{
+		return 1;
+	}
+}
+
+static __u32 __app_movie_get_sub_show_pos(void)
+{
+	reg_movie_para_t *para;
+
+	if(dsk_reg_get_app_restore_flag(REG_APP_MOVIE))
+	{
+		__msg("load default setting...\n");
+		para = (reg_movie_para_t *)dsk_reg_get_default_para_by_app(REG_APP_MOVIE);
+	}
+	else
+	{
+		__msg("load current setting...\n");
+		para = (reg_movie_para_t *)dsk_reg_get_para_by_app(REG_APP_MOVIE);
+	}
+
+	if(para)
+	{
+		__msg("para->sub_pos=%d\n", para->sub_pos);
+		return para->sub_pos;
+	}
+	else
+	{
+		return 0;
+	}
+}
+
+static __u32 app_movie_get_sub_show_color(void)
+{
+	reg_movie_para_t *para;
+
+	if(dsk_reg_get_app_restore_flag(REG_APP_MOVIE))
+	{
+		__msg("load default setting...\n");
+		para = (reg_movie_para_t *)dsk_reg_get_default_para_by_app(REG_APP_MOVIE);
+	}
+	else
+	{
+		__msg("load current setting...\n");
+		para = (reg_movie_para_t *)dsk_reg_get_para_by_app(REG_APP_MOVIE);
+	}
+
+	if(para)
+	{
+		__msg("para->sub_color=%x\n", para->sub_color);
+		return para->sub_color;
+	}
+	else
+	{
+		return GUI_WHITE;
+	}
+}
+
+static __s32 app_movie_reg_para_init(movie_ctrl_t *movie_ctrl)
+{
+	__app_movie_set_play_mode();
+	__app_movie_set_zoom_mode();
+	movie_ctrl->sub_pos   = __app_movie_get_sub_show_pos();
+	movie_ctrl->sub_color = app_movie_get_sub_show_color();
+	movie_ctrl->sub_state = __app_movie_get_sub_show_state();
+	movie_ctrl->sub_stream = __app_movie_get_sub_stream_index();
+	movie_ctrl->sub_size  = 16;
+	dsk_reg_set_app_restore_flag(REG_APP_MOVIE, 0);
+	return EPDK_OK;
+}
+__s32 movie_ff_fb_layer_delete(__gui_msg_t *msg)
+{
+	movie_ctrl_t *movie_ctrl;
+	movie_ctrl = (movie_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(!movie_ctrl)
+	{
+		return EPDK_OK;
+	}
+	if(movie_ctrl->m_hLyr_ff_fb)
+	{
+		GUI_LyrWinDelete(movie_ctrl->m_hLyr_ff_fb);
+		movie_ctrl->m_hLyr_ff_fb = NULL;
+	}
+	if(GUI_IsTimerInstalled(msg->h_deswin, ID_TIMER_HLYR_FF_FB))
+	{
+		GUI_KillTimer(msg->h_deswin, ID_TIMER_HLYR_FF_FB);
+	}
+	return EPDK_OK;
+}
+
+static __s32 movie_play_by_index(movie_ctrl_t *movie_ctrl, __u32 movie_index)
+{
+	__s32 ret;
+	__s32 index;
+	__s32 total;
+	index = robin_npl_get_cur();
+
+	if(-1 == index)
+	{
+		__msg("robin_npl_get_cur fail...\n");
+		return EPDK_FAIL;
+	}
+
+	__movie_delete_breakpoint_info(movie_ctrl, index);
+	total = robin_npl_get_total_count();
+
+	if(-1 == total)
+	{
+		__msg("robin_npl_get_total_count fail...\n");
+		return EPDK_FAIL;
+	}
+
+	//index++;
+	index = movie_index;
+
+	if(index > total)
+	{
+		//index = 0;
+		return EPDK_FAIL;
+	}
+	else if(0 == index)
+	{
+		return EPDK_FAIL; //如果输入第0  个,直接返回
+	}
+	else
+	{
+		index --;
+	}
+	robin_npl_set_cur(index);
+	ret = __movie_play_file(movie_ctrl, index, EPDK_FALSE);
+	return ret;
+}
+
+
+
+
+static void volume_bright_ui_init(movie_ctrl_t *movie_ctrl)
+{
+	if(!movie_ctrl->volume_bmp)
+	{
+		movie_ctrl->volume_bmp = dsk_theme_open(ID_INIT_VOLUME00_BMP);
+		movie_ctrl->volume_bmp_buf = dsk_theme_hdl2buf(movie_ctrl->volume_bmp);
+	}
+	
+	if(!movie_ctrl->bright_bmp)
+	{
+		movie_ctrl->bright_bmp = dsk_theme_open(ID_MOVIE_TP_BRIGHT_BMP);
+		movie_ctrl->bright_bmp_buf = dsk_theme_hdl2buf(movie_ctrl->bright_bmp);
+	}
+}
+
+static void volume_bright_ui_uninit(movie_ctrl_t *movie_ctrl)
+{
+	if(movie_ctrl->volume_bmp)
+	{
+		dsk_theme_close(movie_ctrl->volume_bmp);
+		movie_ctrl->volume_bmp = NULL;
+		movie_ctrl->volume_bmp_buf = NULL;
+	}
+	
+	if(movie_ctrl->bright_bmp)
+	{
+		dsk_theme_close(movie_ctrl->bright_bmp);
+		movie_ctrl->bright_bmp = NULL;
+		movie_ctrl->bright_bmp_buf = NULL;
+	}	
+}
+static  __s32 Bmp_Get_Size(void* bmp_buf,__s32* p_width,__s32* p_height)
+{
+	HBMP hbmp = NULL;
+	hbmp = bmp_open(bmp_buf);
+	if(hbmp)
+	{
+		*p_width = bmp_get_width(hbmp);
+		*p_height = bmp_get_height(hbmp);
+		bmp_close(hbmp);
+		__wrn("--Bmp_Get_Size sucess--\n");
+		return EPDK_OK;
+	}
+	else
+	{
+		__wrn("--Bmp_Get_Size fail--\n");
+		return EPDK_FAIL;
+	}
+}
+
+static __s32 Movie_Paint_Volume_Bright(movie_ctrl_t *movie_ctrl)
+{
+	__s32 volume;
+	__s32 bright;
+	GUI_RECT text_rect;
+	GUI_SetFont(SWFFont);
+	GUI_SetColor(GUI_WHITE);
+	GUI_UC_SetEncodeUTF8();
+	GUI_SetBkColor(GUI_BLACK);
+	if(GUI_LYRWIN_STA_ON != GUI_LyrWinGetSta(movie_ctrl->vol_bri_layer) && (GUI_LYRWIN_STA_SLEEP!= GUI_LyrWinGetSta(movie_ctrl->vol_bri_layer)))
+	{
+		Funprintf("--lyr fail--\n");
+		return EPDK_FAIL;
+	}
+	GUI_LyrWinSel(movie_ctrl->vol_bri_layer);
+	if(1 == Vol_Bri_move_flag)
+	{
+		HTHEME 	bg_bmp=NULL;
+		void    *bg_bmp_buf=NULL;
+		__s32 value = dsk_volume_get();
+	   	if(!bg_bmp)
+		{
+			bg_bmp = dsk_theme_open(ID_INIT_VOLUME00_BMP+value);
+			bg_bmp_buf= dsk_theme_hdl2buf(bg_bmp);
+		}
+		GUI_BMP_Draw(bg_bmp_buf,0,0);
+		dsk_theme_close(bg_bmp);
+		bg_bmp=NULL;
+		bg_bmp_buf=NULL;		
+	}
+	else if(2 == Vol_Bri_move_flag)
+	{
+		GUI_BMP_Draw(movie_ctrl->bright_bmp_buf,0,0);
+		GUI_SetColor(GUI_YELLOW);
+		bright  =  dsk_display_get_lcd_pwm();	
+		eLIBs_int2str_dec(bright+1, movie_ctrl->bright_buf);
+		text_rect.x0 = 50,
+		text_rect.y0 = 53;
+		text_rect.x1 = text_rect.x0+24,
+		text_rect.y1 = text_rect.y0+24;
+		GUI_DispStringInRect(movie_ctrl->bright_buf,&text_rect,GUI_TA_HCENTER|GUI_TA_VCENTER);
+		GUI_SetColor(GUI_BLACK);
+
+	}
+	GUI_LyrWinSetTop(movie_ctrl->vol_bri_layer);
+}
+static __s32 app_movie_volume_show(movie_ctrl_t *movie_ctrl)
+{	
+	if(movie_ctrl->vol_bri_layer == NULL)
+	{
+		__s32 screen_width,screen_height;
+		RECT rect;
+		dsk_display_get_size(&screen_width, &screen_height);
+		Bmp_Get_Size(movie_ctrl->volume_bmp_buf,&rect.width,&rect.height);	
+		rect.x = (screen_width - rect.width) / 2;
+		rect.y = (screen_height - rect.height) / 2;		
+		movie_ctrl->vol_bri_layer = movie_32bpp_layer_create(&rect,1);
+		if(!movie_ctrl->vol_bri_layer)
+		{
+			__wrn("--vol_bri_layer fail--\n");
+			return EPDK_FAIL;
+		}
+		GUI_LyrWinSetTop(movie_ctrl->vol_bri_layer);
+		GUI_LyrWinSetSta(movie_ctrl->vol_bri_layer, GUI_LYRWIN_STA_ON); 
+	}
+	Movie_Paint_Volume_Bright(movie_ctrl);
+	return EPDK_OK;
+}
+static void app_movie_volume_delete(movie_ctrl_t *movie_ctrl)
+{
+	if(movie_ctrl->vol_bri_layer)
+	{
+		GUI_LyrWinDelete(movie_ctrl->vol_bri_layer);
+		movie_ctrl->vol_bri_layer = NULL;
+	}
+}
+static void app_movie_volume_create(__gui_msg_t *msg)
+{
+	__s32 x, y; 
+	__s32 bright;
+	movie_ctrl_t *movie_ctrl;
+	x = LOSWORD(msg->dwAddData2);
+	y = HISWORD(msg->dwAddData2);
+	movie_ctrl = (movie_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	/*音量处理*/
+	if(((volume_step - y) > 60)&& (2 !=Vol_Bri_move_stat))
+	{
+		Vol_Bri_move_flag = 1;
+		Vol_Bri_move_stat = 1;
+		dsk_volume_inc();
+		app_movie_volume_show(movie_ctrl);
+		volume_step = y;
+	}
+	else if(((volume_step - y) < -60)&& (2 !=Vol_Bri_move_stat))
+	{
+		Vol_Bri_move_flag = 1;
+		Vol_Bri_move_stat = 1;
+		dsk_volume_dec();
+		app_movie_volume_show(movie_ctrl);		
+		volume_step = y;
+	}	
+	/*亮度处理*/
+	if(((bright_step - x) > 60) && (1 !=Vol_Bri_move_stat))
+	{
+		Vol_Bri_move_flag = 2;
+		Vol_Bri_move_stat = 2;
+		bright = dsk_display_get_lcd_pwm();
+		if(bright > 0)
+		{
+			dsk_display_set_lcd_pwm(bright - 1);	
+			_set_sys_bright(bright - 1);	
+		}
+		app_movie_volume_show(movie_ctrl);		
+		bright_step = x;
+	}
+	else if(((bright_step - x) < -60)&&(1 !=Vol_Bri_move_stat))
+	{
+		Vol_Bri_move_flag = 2; 
+		Vol_Bri_move_stat = 2;
+		bright = dsk_display_get_lcd_pwm();
+		if(bright < 14)
+		{
+			dsk_display_set_lcd_pwm(bright + 1);
+			_set_sys_bright(bright + 1);
+		}
+		app_movie_volume_show(movie_ctrl);		
+		bright_step = x;
+	}
+}
+
+__s32 app_movie_notify_delete_sub_scene(H_WIN hmanwin)
+{
+	movie_ctrl_t *movie_ctrl;
+	if(!hmanwin)
+	{
+		__wrn("invalid para...\n");
+	}
+	movie_ctrl = (movie_ctrl_t *)GUI_WinGetAddData(hmanwin);
+	if(!movie_ctrl)
+	{
+		__wrn("movie_ctrl is null...\n");
+		return EPDK_FAIL;
+	}
+	movie_delete_subscene_by_id(movie_ctrl, MOVIE_SUB_SCENE_TYPE_ALL & (~MOVIE_SUB_SHOW_ID));
+	return EPDK_OK;
+}
+
+__s32 app_movie_notify_delete_sub_dlg_scene(H_WIN hmanwin)
+{
+	movie_ctrl_t *movie_ctrl;
+	if(!hmanwin)
+	{
+		__wrn("invalid para...\n");
+	}
+	movie_ctrl = (movie_ctrl_t *)GUI_WinGetAddData(hmanwin);
+	if(!movie_ctrl)
+	{
+		__wrn("movie_ctrl is null...\n");
+		return EPDK_FAIL;
+	}
+	//movie_delete_subscene_by_id(movie_ctrl, MOVIE_SUB_SCENE_TYPE_ALL&(~MOVIE_SUB_SHOW_ID) & (~MOVIE_SSET_ID) & (~MOVIE_SPSC_ID));
+	
+	movie_delete_subscene_by_id(movie_ctrl, MOVIE_SUB_SCENE_TYPE_ALL&(~MOVIE_SUB_SHOW_ID));
+	return EPDK_OK;
+}
+
+static __s32 app_movie_key(__gui_msg_t *msg)
+{
+	movie_ctrl_t *movie_ctrl;
+	movie_ctrl = (movie_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(!movie_ctrl)
+	{
+		__wrn("--movie_ctrl null--\n");
+		return EPDK_OK;
+	}
+	if(KEY_UP_ACTION == msg->dwAddData2)
+	{
+		switch(msg->dwAddData1)
+		{
+			case GUI_MSG_KEY_ESCAPE:
+			{
+				movie_delete_subscene_by_id(movie_ctrl, MOVIE_SUB_SCENE_TYPE_ALL & (~MOVIE_SUB_SHOW_ID));
+				__movie_exit_movie(movie_ctrl, 0);
+				return EPDK_OK;	
+			}
+			case GUI_MSG_KEY_LEFT:
+			{
+				movie_delete_subscene_by_id(movie_ctrl, MOVIE_SUB_SCENE_TYPE_ALL & (~MOVIE_SUB_SHOW_ID));
+				__movie_play_prev(movie_ctrl);
+				return EPDK_OK;
+			}
+			case GUI_MSG_KEY_LONGLEFT:
+			{
+				return EPDK_OK;
+			}
+			case GUI_MSG_KEY_RIGHT:
+			{	
+				movie_delete_subscene_by_id(movie_ctrl, MOVIE_SUB_SCENE_TYPE_ALL & (~MOVIE_SUB_SHOW_ID));
+				__movie_play_next(movie_ctrl);
+				return EPDK_OK;	
+			}	
+			default:
+				break;
+		}
+		return EPDK_OK;
+	}
+	else
+	{
+		switch(msg->dwAddData1)
+		{
+			case GUI_MSG_KEY_MENU:
+			{
+				if(EPDK_FALSE == movie_has_sub_scene(movie_ctrl, MOVIE_SPSC_ID))
+				{
+					movie_delete_subscene_by_id(movie_ctrl, MOVIE_SUB_SCENE_TYPE_ALL & (~MOVIE_SUB_SHOW_ID));
+					__movie_spsc_scene_create(movie_ctrl);
+				}					
+				break;
+			}
+			case GUI_MSG_KEY_ESCAPE:
+			{
+				return EPDK_OK;	
+			}
+			case GUI_MSG_KEY_ENTER:
+			{
+				__cedar_status_t sta;
+				sta = robin_get_fsm_status();
+				if(CEDAR_STAT_PLAY == sta)
+				{
+					robin_set_cmd_pause();
+				}
+				else
+				{
+					robin_set_cmd_play();
+				}
+				return EPDK_OK;
+			}
+			default:
+				break;
+		}
+	}
+}
+
+static __s32 app_movie_proc(__gui_msg_t *msg)
+{
+	switch(msg->id)
+	{
+		case GUI_MSG_CREATE:
+		{
+			__s32 ret;
+			movie_ctrl_t *movie_ctrl;		
+			__u32 color[] = {BEETLES_BLACK_COLOR, BEETLES_GRAY_COLOR, 0xC0323232};
+			g_disable_close_scn();
+			SEND_MSG(DSK_MSG_RELEASE_LOGO_BUF, msg->h_deswin, GUI_WinGetHandFromName("init"), 0, 0, 0);
+			SEND_MSG(DSK_MSG_SCREENON_BUT_BKOFF, msg->h_deswin, GUI_WinGetHandFromName("init"), 0, 0, 0);
+			com_set_backcolor(CONST_BackColor_Black);	
+			gscene_hbar_set_state(HBAR_ST_HIDE);
+			gscene_bgd_set_state(BGD_STATUS_HIDE);
+			movie_ctrl = esMEMS_Balloc(sizeof(movie_ctrl_t));
+			if(!movie_ctrl)
+			{
+				__wrn("mem not enough...\n");
+				return EPDK_FAIL;
+			}
+			__here__;
+			__movie_robin_sem_init();
+			__here__;
+			eLIBs_memset(movie_ctrl, 0, sizeof(movie_ctrl_t));
+			__here__;
+			GUI_WinSetAddData(msg->h_deswin, (__u32)movie_ctrl);
+			__here__;
+			movie_ctrl->movie_manager = msg->h_deswin;
+			__here__;
+			__movie_ctrl_para_init(movie_ctrl);
+			__here__;
+			app_movie_reg_para_init(movie_ctrl);		
+			__here__;
+			volume_bright_ui_init(movie_ctrl);
+			com_set_palette_by_id(ID_MOVIE_PAL_BMP);
+			com_set_palette_color_by_index(0xF0, color, BEETLES_TBL_SIZE(color));
+			ret = __movie_cur_file_has_breakpoint();
+			if(1 == MOVIE_ENABLE_BREAKPLAY && EPDK_TRUE == ret)
+			{
+				ret = __movie_breakplay_scene_create(movie_ctrl);
+				if(EPDK_FAIL == ret)
+				{
+					__movie_exit_movie(movie_ctrl, 0);
+					return EPDK_OK;
+				}
+			}
+			else
+			{
+				__here__;
+				if(exp_play_mode->play_state == EXPLOROER_SW_TO_MOVIE)
+				{
+					ret = 0;
+				}
+				__movie_start_play(movie_ctrl, ret);
+				__movie_process_after_start_play(movie_ctrl);
+			}
+			ret = movie_has_sub_scene(movie_ctrl, MOVIE_SPSC_ID);
+
+			if(EPDK_FALSE == ret)
+			{
+				movie_delete_subscene_by_id(movie_ctrl, MOVIE_SUB_SCENE_TYPE_ALL & (~MOVIE_SUB_SHOW_ID));	
+				__movie_spsc_scene_create(movie_ctrl);				
+			}
+			GUI_SetTimer(movie_ctrl->movie_manager, MOVE_LYR_TIMERID,MOVE_LYR_TIMEROUT,NULL);
+			return EPDK_OK;
+		}
+		case GUI_MSG_CLOSE:
+		{
+			if(1 == msg->dwAddData1)
+			{
+				movie_cmd2parent(msg->h_deswin, SWITCH_TO_MMENU, 0, 0);
+			}
+			else
+			{
+				movie_cmd2parent(msg->h_deswin, SWITCH_TO_EXPLORER, 0, 0);
+			}
+			return EPDK_OK;
+		}
+		case GUI_MSG_KEY:
+		{
+			app_movie_key(msg);
+			return EPDK_OK;		
+		}
+
+
+		case GUI_MSG_TOUCH:
+		{
+			movie_ctrl_t *movie_ctrl;
+			__s32 x, y,direct; 
+			__s32 ret = -1;			
+			x = LOSWORD(msg->dwAddData2);
+			y = HISWORD(msg->dwAddData2);
+			direct = HISWORD(msg->dwReserved);		
+			movie_ctrl = (movie_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			if(!movie_ctrl)
+			{
+				__wrn("--movie_ctrl is null...\n--");
+				return EPDK_OK;
+			}
+			if(GUI_IsTimerInstalled(movie_ctrl->movie_manager,MOVE_LYR_TIMERID))
+			{
+				GUI_ResetTimer(movie_ctrl->movie_manager, MOVE_LYR_TIMERID,500,NULL);
+			}	
+			ret = movie_has_sub_scene(movie_ctrl, MOVIE_BREAKPLAY_DIALOG_ID);
+			if(EPDK_TRUE == ret)
+			{
+               if(movie_ctrl->breakplay_scene)
+                {
+                    __gui_msg_t setmsg;
+                    eLIBs_memcpy(&setmsg, msg, sizeof(__gui_msg_t));
+                    setmsg.h_deswin = movie_ctrl->breakplay_scene;
+                    GUI_SendMessage(&setmsg);
+                    return EPDK_OK;
+                }
+            }
+            ret = movie_has_sub_scene(movie_ctrl, MOVIE_PLAYERROR_DIALOG_ID);
+            if(EPDK_TRUE == ret)
+            {
+                if(movie_ctrl->playerror_scene)
+                {
+                    __gui_msg_t setmsg;
+                    eLIBs_memcpy(&setmsg, msg, sizeof(__gui_msg_t));
+                    setmsg.h_deswin = movie_ctrl->playerror_scene;
+                    GUI_SendMessage(&setmsg);
+                    return EPDK_OK;
+                }
+                
+            }
+            ret = movie_has_sub_scene(movie_ctrl, MOVIE_PLAYEND_DIALOG_ID);
+            if(EPDK_TRUE == ret)
+            {
+                if(movie_ctrl->playend_scene)
+                {
+                    __gui_msg_t setmsg;
+                    eLIBs_memcpy(&setmsg, msg, sizeof(__gui_msg_t));
+                    setmsg.h_deswin = movie_ctrl->playend_scene;
+                    GUI_SendMessage(&setmsg);
+                    return EPDK_OK;
+                }                    
+            }       
+			switch(msg->dwAddData1)
+			{
+				case GUI_MSG_TOUCH_UP:
+				{						
+					if(Vol_Bri_move_flag)
+					{
+						Vol_Bri_move_stat = 0;
+						Vol_Bri_move_flag = 0;
+						app_movie_volume_delete(movie_ctrl);
+						return EPDK_OK;
+					} 		
+					if(process_state)		/*hide*/
+					{	
+						gscene_hbar_set_state(HBAR_ST_HIDE);	
+						movie_spsc_scene_LyMove(movie_ctrl->spsc_scene,0,250);	
+						process_state = 0;
+					}
+					else 					/*show*/
+					{	
+						if(EPDK_FALSE == movie_has_sub_scene(movie_ctrl,MOVIE_SPSC_ID))
+						{
+							movie_delete_subscene_by_id(movie_ctrl, MOVIE_SUB_SCENE_TYPE_ALL & (~MOVIE_SUB_SHOW_ID));	
+							__movie_spsc_scene_create(movie_ctrl);
+							return EPDK_OK;
+						}
+						gscene_hbar_set_state(HBAR_ST_SHOW);
+						movie_spsc_scene_LyMove(movie_ctrl->spsc_scene,0,-250);	
+						process_state = 1;
+					}
+
+					return EPDK_OK;	
+				}
+				case GUI_MSG_TOUCH_DOWN:
+				{
+					bright_step = x;
+					volume_step = y;	
+					break;
+				}
+				case GUI_MSG_TOUCH_MOVE:
+				{ 					
+					if(!process_state)					
+					{
+						app_movie_volume_create(msg);
+					}					
+				}
+				default:
+					break;
+			}
+			break;
+		}
+
+		case GUI_MSG_TIMER:
+		{
+			movie_ctrl_t *movie_ctrl;
+			__s32 ret = EPDK_FAIL;
+			movie_ctrl = (movie_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			if(movie_ctrl)
+			{		
+				if(LOWORD(msg->dwAddData1) == movie_ctrl->auto_play_timmer_id)
+				{
+					__s32 play_sta;
+					play_sta = __movie_check_for_play_err(movie_ctrl);
+					if(EPDK_OK == play_sta)
+					{
+						movie_ctrl->h_deswin = msg->h_deswin;
+						__movie_check_for_auto_play(movie_ctrl);
+					}
+					ret = EPDK_OK;
+				}
+				else if(LOWORD(msg->dwAddData1) == movie_ctrl->auto_flush_timmer_id)
+				{
+					movie_save_breakpoint_info(movie_ctrl);
+					GUI_ResetTimer(movie_ctrl->movie_manager, movie_ctrl->auto_flush_timmer_id,MOVIE_AUTO_FLUSH_TIME, NULL);
+					ret = EPDK_OK;
+				}
+				else if(LOWORD(msg->dwAddData1) == ID_TIMER_HLYR_FF_FB)
+				{
+					movie_ff_fb_layer_delete(msg);
+					if(!movie_ctrl->m_ff_fb_speed)
+					{
+						//movie_delete_subscene_by_id(movie_ctrl, MOVIE_PROG_ID);
+					}
+					ret = EPDK_OK;
+				}
+				else if(LOWORD(msg->dwAddData1) == MOVE_LYR_TIMERID)
+				{
+					if(process_state)
+					{
+						gscene_hbar_set_state(HBAR_ST_HIDE);			
+						movie_spsc_scene_LyMove(movie_ctrl->spsc_scene,0,250);	
+						process_state = 0;
+					}
+				}
+			}
+			else
+			{
+				__wrn("--movie_ctrl null--n");
+				return EPDK_OK;
+			}
+			if(EPDK_FAIL == ret)
+			{
+				break;
+			}
+			else
+			{
+				return EPDK_OK;
+			}
+		}
+		case GUI_MSG_DESTROY:
+		{
+			movie_ctrl_t *movie_ctrl;
+			__msg("app_movie_proc: GUI_MSG_DESTROY begin\n");
+			movie_ctrl = (movie_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			if(movie_ctrl)
+			{
+				if(is_on_tv())
+				{
+					__movie_switch_to_tv_or_lcd(movie_ctrl);
+				}
+				volume_bright_ui_uninit(movie_ctrl);
+				app_movie_volume_delete(movie_ctrl);
+				__movie_uninstall_auto_play_timmer(movie_ctrl);
+				{
+					__s32 index;
+					index = robin_npl_get_cur();
+					__here__;
+
+					if(-1 != index)
+					{
+						__here__;
+						__movie_save_breakpoint_info(movie_ctrl, index);
+					}
+				}
+				__movie_save_last_playing_file(movie_ctrl);
+				{
+					__s32 ret;
+					ret = __movie_save_last_playing_file(movie_ctrl);
+					if(EPDK_OK == ret)
+					{
+						__msg("__movie_save_last_playing_file success...\n");
+					}
+					else
+					{
+						__msg("__movie_save_last_playing_file fail...\n");
+					}
+				}
+				__here__;
+				__movie_stop_play(movie_ctrl);
+				__here__;
+				movie_delete_subscene_by_id(movie_ctrl, MOVIE_SUB_SCENE_TYPE_ALL);
+				movie_ff_fb_layer_delete(msg);
+				__here__;
+				__movie_ctrl_para_deinit(movie_ctrl);
+				eLIBs_memset(movie_ctrl, 0, sizeof(movie_ctrl_t));
+				esMEMS_Bfree(movie_ctrl, sizeof(movie_ctrl_t));
+				__here__;
+			}
+
+			g_display_switch_output(LION_DISP_LCD);//movie 退出时恢复到小机显示
+			g_enable_close_scn();
+			robin_close();			
+			__movie_robin_sem_deinit();
+			{
+				reg_root_para_t *root_reg_para;
+				root_reg_para = (reg_root_para_t *)dsk_reg_get_para_by_app(REG_APP_ROOT);
+
+				if(root_reg_para)
+				{
+					root_reg_para->cur_play_storage = -1;
+				}
+				else
+				{
+					__wrn("para is null...\n");
+				}
+			}
+			com_set_backcolor(CONST_BackColor);
+			SEND_MSG(DSK_MSG_SCREENOFF_BKOFF, msg->h_deswin, GUI_WinGetHandFromName("init"), 0, 0, 0);
+			__msg("app_movie_proc: GUI_MSG_DESTROY end\n");
+			return EPDK_OK;
+		}
+		case GUI_MSG_COMMAND:
+		{
+			__s32 ret;
+			movie_ctrl_t *movie_ctrl;
+			movie_ctrl = (movie_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			__msg("app_movie_proc: GUI_MSG_COMMAND begin\n");
+
+			if(movie_ctrl)
+			{
+				switch(LOWORD(msg->dwAddData1))
+				{
+					case MOVIE_SPSC_ID:
+					{
+						ret = __spsc_scene_cmd_proc(movie_ctrl, HIWORD(msg->dwAddData1), msg->dwAddData2);
+						break;
+					}
+
+					case MOVIE_SUB_SHOW_ID:
+					{
+						break;
+					}
+					case MOVIE_BREAKPLAY_DIALOG_ID:
+					{
+						ret = __breakplay_scene_cmd_proc(movie_ctrl, HIWORD(msg->dwAddData1), msg->dwAddData2);
+						break;
+					}
+
+					default:
+					{
+						break;
+					}
+				}
+			}
+			else
+			{
+				__msg("movie_ctrl is null...\n");
+			}
+
+			__msg("app_movie_proc: GUI_MSG_COMMAND end\n");
+			return EPDK_OK;
+		}
+
+		case DSK_MSG_TVDAC_PLUGOUT:
+		case DSK_MSG_HDMI_PLUGOUT:
+		{
+			movie_ctrl_t *movie_ctrl;
+			__msg("************DSK_MSG_TVDAC_PLUGOUT/DSK_MSG_HDMI_PLUGOUT*******\n");
+			movie_ctrl = (movie_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+
+			if(!movie_ctrl)
+			{
+				__wrn("movie_ctrl is null...\n");
+				return EPDK_OK;
+			}
+
+			__msg("before __movie_switch_to_tv_or_lcd\n");
+			__movie_switch_to_tv_or_lcd(movie_ctrl);
+			__msg("after __movie_switch_to_tv_or_lcd\n");
+			return EPDK_OK;
+		}
+
+		case DSK_MSG_FS_PART_PLUGOUT:
+		{
+			__bool to_exist;//用于记录是否退出
+			__s32 ret;
+			char diskname[2] = {0};
+			char cur_play_file[RAT_MAX_FULL_PATH_LEN] = {0};
+			movie_ctrl_t *movie_ctrl;
+			movie_ctrl = (movie_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			if(!movie_ctrl)
+			{
+				__msg("movie_ctrl is null...\n");
+				return EPDK_OK;
+			}
+
+			diskname[0] = (char)(msg->dwAddData2);
+			diskname[1] = 0;
+			to_exist = 1;//默认需要退出
+			ret = robin_npl_get_cur();
+
+			if(-1 != ret)
+			{
+				ret = robin_npl_index2file(ret, cur_play_file);
+
+				if(EPDK_OK == ret)
+				{
+					if(0 != eLIBs_strnicmp(cur_play_file, diskname, 1))
+					{
+						to_exist = 0;//拔的卡不是当前播放文件所在卡，不需要退出
+					}
+				}
+			}
+
+			if(1 == to_exist)//需要退出
+			{
+				movie_ctrl->quit_by_fs_part_plug_out = EPDK_TRUE;
+
+				if(is_on_tv())
+				{
+					__movie_switch_to_tv_or_lcd(movie_ctrl);
+				}
+
+				__movie_exit_movie(movie_ctrl, 1);
+			}
+
+			return EPDK_OK;
+		}
+		case MSG_WECHAT_MSG:
+		{
+			__s32 index, ret;
+			HRAT hrat;
+			__u32 total;
+			rat_entry_t ItemInfo;
+			char file_path[RAT_MAX_FULL_PATH_LEN];
+			char  STRING_WECHAT_VIDEO[32]    = "f:\\wechat\\video\\";			
+			movie_ctrl_t *movie_ctrl;	
+			movie_ctrl = (movie_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+			eLIBs_strcpy(file_path, STRING_WECHAT_VIDEO);
+			rat_clear_all_list_by_root((void *)file_path[0]);
+			hrat = rat_open(STRING_WECHAT_VIDEO, RAT_MEDIA_TYPE_VIDEO, 0);
+			if(hrat == NULL)
+			{
+				eDbug("-- rat open fail -- \n");
+				return EPDK_FAIL;
+			}
+			total = rat_get_cur_scan_cnt(hrat);
+			if(total == 0)
+				return EPDK_FAIL;
+			eLIBs_memset(&ItemInfo,0,sizeof(rat_entry_t));		
+			ret = rat_get_item_info_by_index(hrat, 0, &ItemInfo);
+			eLIBs_memset(file_path, 0, sizeof(file_path));
+			eLIBs_strcpy(file_path, ItemInfo.Path);	
+			rat_set_file_for_play(hrat,file_path);		
+			npl_delete();
+			npl_create(RAT_MEDIA_TYPE_VIDEO);
+			__movie_play_file(movie_ctrl, total-1, 0);
+			break;		
+		}
+		case DSK_MSG_HOME:
+		{
+			movie_ctrl_t *movie_ctrl;
+			__msg("************DSK_MSG_HOME*******\n");
+			movie_ctrl = (movie_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+
+			if(!movie_ctrl)
+			{
+				__msg("movie_ctrl is null...\n");
+				return EPDK_OK;
+			}
+
+			if(is_on_tv())
+			{
+				__movie_switch_to_tv_or_lcd(movie_ctrl);
+			}
+
+			__movie_exit_movie(movie_ctrl, 1);
+			return EPDK_OK;
+		}
+		default:
+		{
+			__msg("app_movie_proc: default\n");
+			break;
+		}
+	}
+
+	return GUI_ManWinDefaultProc(msg);
+}
+

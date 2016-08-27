@@ -1,0 +1,614 @@
+
+#include "karaok_man.h"
+#include "../common/common.h"
+#include "karaok_prog.h"
+
+static __s32 karaok_volume_step = 0;
+static __s32 karaok_bright_step = 0;
+
+void *karaok_man_scene_create(karaok_man_create_para_t *create_para)
+{
+	__gui_manwincreate_para_t create_info;	
+	karaok_man_scene_t  *sence_para;	
+	karaok_man_uipara_t *ui_para;
+	RECT lyr_rect;
+	
+	sence_para = (karaok_man_scene_t *)esMEMS_Balloc(sizeof(karaok_man_scene_t));
+	if(!sence_para)
+	{
+		__msg("mem not enough...\n");
+		return NULL;
+	}
+	eLIBs_memset(sence_para, 0, sizeof(karaok_man_scene_t));
+	
+	sence_para->hparent  = create_para->hparent;
+	sence_para->scene_id = create_para->scene_id;
+	ui_para = karaok_man_get_uipara(GUI_GetScnDir());
+	if(NULL == ui_para)
+	{
+		esMEMS_Bfree(sence_para, sizeof(karaok_man_scene_t));
+		sence_para = NULL;
+		__msg("--karaok_man_scene_create fail--\n");
+		return NULL;
+	}
+	lyr_rect.x		 = ui_para->man_scene_lyr.x;
+	lyr_rect.y		 = ui_para->man_scene_lyr.y;
+	lyr_rect.width	 = ui_para->man_scene_lyr.w;
+	lyr_rect.height  = ui_para->man_scene_lyr.h;
+	sence_para->hlyr = karaok_man_layer_create(&lyr_rect, ui_para->pipe);
+	if(NULL == sence_para->hlyr)
+	{
+		esMEMS_Bfree(sence_para, sizeof(karaok_man_scene_t));
+		sence_para = NULL;
+		return NULL;
+	}
+	eLIBs_memset(&create_info, 0, sizeof(__gui_manwincreate_para_t));
+	create_info.name            = "karaok_man_win";
+	create_info.hParent         = sence_para->hparent;
+	create_info.ManWindowProc   = (__pGUI_WIN_CB)esKRNL_GetCallBack((__pCBK_t)karaok_man_scene_proc);
+	create_info.attr            = (void *)sence_para;
+	create_info.id				= sence_para->scene_id;
+	create_info.hHosting        = NULL;
+	sence_para->man_manager 	= GUI_ManWinCreate(&create_info);
+	if(!sence_para->man_manager)
+	{
+		esMEMS_Bfree(sence_para, sizeof(karaok_man_scene_t));
+		sence_para = NULL;
+		return NULL;
+	}
+	GUI_LyrWinSetSta(sence_para->hlyr, GUI_LYRWIN_STA_ON);
+	GUI_LyrWinSetTop(sence_para->hlyr);
+	return sence_para;
+}
+
+__s32 karaok_man_scene_delete(void *handle)
+{
+	karaok_man_scene_t *scene_para;
+	scene_para = (karaok_man_scene_t *)handle;
+	if(NULL == handle)
+	{
+		__wrn("invalid para..\n");
+		return EPDK_FAIL;
+	}
+
+	if(!scene_para->man_manager)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	GUI_ManWinDelete(scene_para->man_manager);
+	scene_para->man_manager = NULL;
+	if(!scene_para->hlyr)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	GUI_LyrWinDelete(scene_para->hlyr);
+	scene_para->hlyr = NULL;
+	
+	eLIBs_memset(scene_para, 0, sizeof(karaok_man_scene_t));
+	esMEMS_Bfree(scene_para, sizeof(karaok_man_scene_t));
+	return EPDK_OK;
+}
+
+
+static H_LYR karaok_man_layer_create(RECT *rect, __s32 pipe)
+{
+	H_LYR layer = NULL;
+	FB	fb =
+	{
+		{0, 0}, 																		
+		{0, 0, 0},																		
+		{FB_TYPE_RGB, {PIXEL_COLOR_ARGB8888, 0, (__rgb_seq_t)0}}, 	
+	};
+	__disp_layer_para_t lstlyr =
+	{
+		DISP_LAYER_WORK_MODE_NORMAL,										
+		0,																							
+		0,																							
+		0,																							
+		0,																							
+		0xff, 																					
+		{0, 0, 0, 0}, 														
+		{0, 0, 0, 0}, 															
+		DISP_LAYER_OUTPUT_CHN_DE_CH1, 									
+		NULL																						
+	};
+	__layerwincreate_para_t lyrcreate_info =
+	{
+		"karaok man layer",
+		NULL,
+		GUI_LYRWIN_STA_SUSPEND,
+		GUI_LYRWIN_NORMAL
+	};
+	fb.size.width 	= rect->width;
+	fb.size.height		= rect->height;
+	fb.fmt.fmt.rgb.pixelfmt = PIXEL_COLOR_ARGB8888;
+	lstlyr.src_win.x		= 0;
+	lstlyr.src_win.y		= 0;
+	lstlyr.src_win.width	= rect->width;
+	lstlyr.src_win.height 	= rect->height;
+	lstlyr.scn_win.x		= rect->x;
+	lstlyr.scn_win.y		= rect->y;
+	lstlyr.scn_win.width	= rect->width;
+	lstlyr.scn_win.height 	= rect->height;
+	lstlyr.pipe = pipe;
+	lstlyr.fb = &fb;
+	lyrcreate_info.lyrpara = &lstlyr;
+	layer = GUI_LyrWinCreate(&lyrcreate_info);
+
+	if(!layer)
+	{
+		__wrn("app bar layer create error !\n");
+	}
+	return layer;
+}
+
+static __s32 karaok_man_ui_init(void)
+{
+	karaok_man_uipara_t* ui_para = NULL;
+	__u8 i = 0;
+	ui_para = karaok_man_get_uipara(GUI_GetScnDir());
+	if(NULL == ui_para)
+	{
+		__wrn("--para fail--\n");
+		return NULL;
+	}
+	for(i = 0; i < karaok_man_icon_num; i++)
+	{
+		ui_para->uipara_man_icon[i].res_hd = dsk_theme_open(ui_para->uipara_man_icon[i].res_id);
+		if(NULL == ui_para->uipara_man_icon[i].res_hd)
+		{
+			__wrn("--para is NULL--\n");
+			return EPDK_FAIL;
+		}
+	}
+	return EPDK_OK;
+}
+static __s32 karaok_man_ui_release(void)
+{
+	karaok_man_uipara_t* ui_para = NULL;
+	__u8 i = 0;
+	ui_para = karaok_man_get_uipara(GUI_GetScnDir());
+	if(NULL == ui_para)
+	{
+		__wrn("--para fail--\n");
+		return NULL;
+	}
+	for(i = 0; i < karaok_man_icon_num; i++)
+	{
+		if(ui_para->uipara_man_icon[i].res_hd)
+		{
+			dsk_theme_close(ui_para->uipara_man_icon[i].res_hd);
+			ui_para->uipara_man_icon[i].res_hd = NULL;
+		}
+	}
+	return EPDK_OK;
+}
+
+
+static __s32 karaok_man_volume_create(karaok_man_scene_t* scene_para)
+{
+	karaok_man_uipara_t* ui_para = NULL;
+	GUI_RECT text_rect;
+	RECT rect_lyr;
+	__u8 bright;
+	ui_para = karaok_man_get_uipara(GUI_GetScnDir());
+	if(NULL == ui_para)
+	{
+		__wrn("--para fail--\n");
+		return NULL;
+	}
+	rect_lyr.x = ui_para->uipara_man_show_lyr.x;
+	rect_lyr.y = ui_para->uipara_man_show_lyr.y;
+	rect_lyr.width  = ui_para->uipara_man_show_lyr.w;
+	rect_lyr.height = ui_para->uipara_man_show_lyr.h;
+	Funprintf("lyr x = %d = %d = %d = %d--\n",rect_lyr.x,rect_lyr.y,rect_lyr.width,rect_lyr.height);
+	if(NULL == scene_para->icon_lyr)
+	{
+		scene_para->icon_lyr = com_layer_create(&rect_lyr,1,PIXEL_COLOR_ARGB8888, GUI_LYRWIN_STA_SLEEP,"man_icon_layer");
+		if(NULL == scene_para->icon_lyr)
+		{
+			Funprintf("--layer is fail--\n");
+			return EPDK_FAIL;
+		}
+	}
+	GUI_LyrWinSetSta(scene_para->icon_lyr,GUI_LYRWIN_STA_ON);
+	if(GUI_LYRWIN_STA_ON != GUI_LyrWinGetSta(scene_para->icon_lyr)&&(GUI_LYRWIN_STA_SLEEP!= GUI_LyrWinGetSta(scene_para->icon_lyr)))
+	{
+		Funprintf("--icon lyr fail--\n");
+		return EPDK_FAIL;
+	}
+	GUI_SetFont(SWFFont);
+	GUI_SetColor(GUI_WHITE);
+	GUI_UC_SetEncodeUTF8();
+	GUI_SetBkColor(GUI_BLACK);
+	GUI_LyrWinSel(scene_para->icon_lyr);
+	GUI_LyrWinSetTop(scene_para->icon_lyr);
+	if(karaok_man_volume == scene_para->man_icon)
+	{
+		__u32 value = 0;
+		HTHEME volume_id;
+		void* volume_buf = NULL;
+		value = dsk_volume_get();
+		volume_id  = dsk_theme_open(ID_INIT_VOLUME00_BMP+value);
+		volume_buf = dsk_theme_hdl2buf(volume_id);
+		GUI_BMP_Draw(volume_buf,ui_para->uipara_man_icon[karaok_man_icon_volume].x,ui_para->uipara_man_icon[karaok_man_icon_volume].y);
+		dsk_theme_close(volume_id);
+		volume_id = NULL;
+		volume_buf = NULL;
+	}
+	else if(karaok_man_bright == scene_para->man_icon)
+	{
+		scene_para->bright_buf = dsk_theme_hdl2buf(ui_para->uipara_man_icon[karaok_man_icon_bright].res_hd);
+		GUI_BMP_Draw(scene_para->bright_buf,ui_para->uipara_man_icon[karaok_man_icon_volume].x,ui_para->uipara_man_icon[karaok_man_icon_volume].y);
+		GUI_SetColor(GUI_YELLOW);
+		bright  =  dsk_display_get_lcd_pwm();
+		eLIBs_int2str_dec(bright+1, scene_para->bright_txt);
+		text_rect.x0 = 50,
+		text_rect.y0 = 53;
+		text_rect.x1 = text_rect.x0+24,
+		text_rect.y1 = text_rect.y0+24;
+		GUI_DispStringInRect(scene_para->bright_txt,&text_rect,GUI_TA_HCENTER|GUI_TA_VCENTER);
+		GUI_SetColor(GUI_BLACK);
+	}
+	return EPDK_OK;
+}
+
+static __s32 karaok_man_volume_delete(karaok_man_scene_t* scene_para)
+{
+	if(scene_para->icon_lyr)
+	{
+		GUI_LyrWinDelete(scene_para->icon_lyr);
+		scene_para->icon_lyr = NULL;
+	}
+	return EPDK_OK;
+}
+static __s32 karaok_man_volume_touch(__gui_msg_t* msg)
+{
+	__s32 x,y,bright;
+	karaok_man_scene_t *sence_para;
+	sence_para = GUI_WinGetAttr(msg->h_deswin);
+	x = LOSWORD(msg->dwAddData2);
+	y = HISWORD(msg->dwAddData2);
+	if(((karaok_volume_step-y) > 60)&&(sence_para->man_icon != karaok_man_icon_bright))
+	{
+		dsk_volume_inc();
+		sence_para->man_icon = karaok_man_volume;
+		karaok_man_volume_create(sence_para);
+		karaok_volume_step = y;
+	}
+	else if(((sence_para->karaok_volume_step-y) < -60)&&(sence_para->man_icon != karaok_man_icon_bright))
+	{
+		dsk_volume_dec();
+		sence_para->man_icon = karaok_man_volume;
+		karaok_man_volume_create(sence_para);
+		karaok_volume_step = y;
+	}
+	else
+	{
+		return EPDK_OK;
+	}
+
+	/*亮度处理*/
+	if(((karaok_bright_step - x) > 60)&&(sence_para->man_icon != karaok_man_icon_volume))
+	{
+		bright = dsk_display_get_lcd_pwm();
+		if(bright > 0)
+		{
+			dsk_display_set_lcd_pwm(bright - 1);
+			_set_sys_bright(bright - 1);
+		}
+		sence_para->man_icon = karaok_man_bright;
+		karaok_man_volume_create(sence_para);
+		karaok_bright_step = x;
+	}
+	else if((karaok_bright_step - x) < -60)&&(sence_para->man_icon != karaok_man_icon_volume))
+	{
+		bright = dsk_display_get_lcd_pwm();
+		if(bright < 14)
+		{
+			dsk_display_set_lcd_pwm(bright + 1);
+			_set_sys_bright(bright + 1);
+		}
+		sence_para->man_icon = karaok_man_bright;
+		karaok_man_volume_create(sence_para);
+		karaok_bright_step = x;
+	}
+	else
+	{
+		return EPDK_OK;
+	}
+	return EPDK_OK;
+}
+static __s32 karaok_man_install_hide_timmer(karaok_man_scene_t *scene_para)
+{
+	if(!scene_para)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	scene_para->man_hide_timmer_id = 0x13;
+	if(!GUI_IsTimerInstalled(scene_para->man_manager, scene_para->man_hide_timmer_id))
+	{
+		GUI_SetTimer(scene_para->man_manager, scene_para->man_hide_timmer_id,1000, NULL);//10��
+	}
+	else
+	{
+		__msg("timmer already install...\n");
+		return EPDK_FAIL;
+	}
+
+	return EPDK_OK;
+}
+
+static __s32 karaok_man_reset_hide_timmer(karaok_man_scene_t *scene_para)
+{
+	if(!scene_para)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	if(GUI_IsTimerInstalled(scene_para->man_manager, scene_para->man_hide_timmer_id))
+	{
+		GUI_ResetTimer(scene_para->man_manager, scene_para->man_hide_timmer_id, 500, NULL);
+	}
+	else
+	{
+		__msg("timmer already install...\n");
+		return EPDK_FAIL;
+	}
+
+	return EPDK_OK;
+}
+
+static __s32 karaok_man_uninstall_hide_timmer(karaok_man_scene_t *scene_para)
+{
+	if(!scene_para)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	if(GUI_IsTimerInstalled(scene_para->man_manager, scene_para->man_hide_timmer_id))
+	{
+		GUI_KillTimer(scene_para->man_manager, scene_para->man_hide_timmer_id);
+	}
+	return EPDK_OK;
+}
+__s32 karaok_man_scene_set_focus(void *handle)
+{
+	karaok_man_scene_t *scene_para;
+	scene_para = (karaok_man_scene_t *)handle;
+	if(NULL == handle)
+	{
+		__err("invalid para..\n");
+		return EPDK_FAIL;
+	}
+	__here__;
+	if(!scene_para->hfrm)
+	{
+		__err("invalid para..\n");
+		return EPDK_FAIL;
+	}
+	GUI_WinSetFocusChild(scene_para->hfrm);
+	return EPDK_OK;
+}
+
+static __s32 karaok_man_prog_scene_create(karaok_man_scene_t *scene_para)
+{	
+	karaok_prog_create_para_t create_para;
+	if(!scene_para)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	eLIBs_memset(&create_para, 0, sizeof(karaok_prog_create_para_t));
+	create_para.hparent  		= scene_para->man_manager;
+	create_para.scene_id		= karaok_prog_scene_id;
+	create_para.hlyr	  		= scene_para->hlyr;
+	scene_para->prog_scene 		= karaok_prog_scene_create(&create_para);
+	if(!scene_para->prog_scene)
+	{
+		__msg("moive_spsc_prog_frm_create fail...\n");
+		return EPDK_FAIL;
+	}
+	karaok_man_scene_set_focus(scene_para->prog_scene);
+	return EPDK_OK;
+}
+
+__s32 karaok_man_prog_scene_delete(karaok_man_scene_t *scene_para)
+{
+	if(!scene_para)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	if(scene_para->prog_scene)
+	{
+		__msg("before karaok_prog_scene_delete\n");
+		karaok_prog_scene_delete(scene_para->prog_scene);
+		scene_para->prog_scene = NULL;
+		__msg("after spsc_prog_frm_delete\n");
+	}
+	return EPDK_OK;
+}
+static __s32 karaok_man_scene_proc(__gui_msg_t *msg)
+{
+	switch(msg->id)
+	{
+		case GUI_MSG_CREATE:
+		{
+			__s32 ret;
+			karaok_man_scene_t *sence_para;
+			sence_para = GUI_WinGetAttr(msg->h_deswin);
+			if(!sence_para)
+			{
+				__wrn("invalid para...\n");
+				return EPDK_FAIL;
+			}
+			sence_para->man_manager = msg->h_deswin;
+			karaok_man_ui_init();
+			ret = karaok_man_prog_scene_create(sence_para);
+			if(EPDK_FAIL == ret)
+			{
+				__wrn("karaok_man_prog_scene_create fail...\n");
+				return EPDK_FAIL;
+			}
+			karaok_prog_scene_set_focus(sence_para->prog_scene);
+			karaok_man_install_hide_timmer(sence_para);
+			return EPDK_OK;
+		}
+		case GUI_MSG_DESTROY:
+		{
+			karaok_man_scene_t *sence_para;
+			Funprintf("__movie_spsc_proc GUI_MSG_DESTROY begin\n\n");
+			sence_para = GUI_WinGetAttr(msg->h_deswin);
+
+			if(!sence_para)
+			{
+				__wrn("invalid para...\n");
+				return EPDK_FAIL;
+			}
+			karaok_man_ui_release();
+			karaok_man_volume_delete(sence_para);
+			karaok_man_uninstall_hide_timmer(sence_para);
+			karaok_man_prog_scene_delete(sence_para);
+			return EPDK_OK;
+		}
+		case GUI_MSG_COMMAND:
+		{
+			karaok_man_scene_t *sence_para;
+			sence_para = GUI_WinGetAttr(msg->h_deswin);
+			if(!sence_para)
+			{
+				__wrn("invalid para...\n");
+				return EPDK_FAIL;
+			}	
+			switch(LOWORD(msg->dwAddData1))
+			{		
+				case karaok_prog_scene_id:
+				{
+					karaok_cmd2parent(msg->h_deswin, HIWORD(msg->dwAddData1),msg->dwAddData2,0);
+					break;
+				}
+				default:
+				{
+					__msg("unknown scene id...\n");
+					break;
+				}
+			}
+			return EPDK_OK;
+		}
+		case GUI_MSG_KEY:
+		{
+			karaok_man_scene_t *sence_para;
+			__msg("__movie_spsc_proc GUI_MSG_KEY\n");//������Ϣȫ�����´����ӳ���frmwin
+			sence_para = GUI_WinGetAttr(msg->h_deswin);
+			if(!sence_para)
+			{
+				__wrn("invalid para...\n");
+				return EPDK_FAIL;
+			}
+			karaok_man_reset_hide_timmer(sence_para);
+			break;
+		}
+
+		case GUI_MSG_TOUCH:
+		{
+			__s32 x, y;
+			karaok_man_scene_t *sence_para;
+			sence_para = GUI_WinGetAttr(msg->h_deswin);
+			if(!sence_para)
+			{
+				__wrn("invalid para...\n");
+				return EPDK_FAIL;
+			}
+			karaok_man_reset_hide_timmer(sence_para);
+			x = LOSWORD(msg->dwAddData2);
+			y = HISWORD(msg->dwAddData2);
+			gscene_hbar_get_state(&sence_para->hbar_stat);
+			Funprintf("--karaok man touch x = %d y = %d dw1 = %d hbstatus = %d--\n\n",x,y,msg->dwAddData1,sence_para->hbar_stat);
+			switch(msg->dwAddData1)
+			{
+				case GUI_MSG_TOUCH_DOWN:
+				{
+					araok_bright_step = x;
+					araok_volume_step = y;
+					break;
+				}
+				case GUI_MSG_TOUCH_UP:
+				{
+					sence_para->man_icon = karaok_man_icon_num;
+					karaok_man_volume_delete(sence_para);
+					break;
+				}
+				case GUI_MSG_TOUCH_MOVE:
+				{
+					if(!sence_para->hbar_stat)
+					{
+						Funprintf("--here--\n");
+						karaok_man_volume_touch(msg);
+						Funprintf("--here--\n");
+						return EPDK_OK;
+					}
+					break;
+				}
+				default:
+					break;
+			}
+			break;
+		}
+		case GUI_MSG_TIMER:
+		{
+			karaok_man_scene_t *sence_para;
+			sence_para = GUI_WinGetAttr(msg->h_deswin);
+			if(sence_para)
+			{
+				if(LOWORD(msg->dwAddData1) == sence_para->man_hide_timmer_id)
+				{
+				
+				}
+			}
+			break;
+		}
+		case GUI_MSG_CLOSE:
+		{
+			__msg("__movie_spsc_proc GUI_MSG_CLOSE begin\n");
+			karaok_cmd2parent(msg->h_deswin, man_scene_msg_timeout, 0, 0);
+			__msg("__movie_spsc_proc GUI_MSG_CLOSE end\n");
+			return EPDK_OK;
+		}
+		default:
+		{
+			break;
+		}
+	}
+
+	return GUI_ManWinDefaultProc(msg);
+}
+
+
+__s32 karaok_man_scene_LyMove(void *handle,__s32 Move_X,__s32 Move_Y)
+
+{
+	karaok_man_scene_t *scene_para;
+	scene_para = (karaok_man_scene_t *)handle;
+	if(NULL == handle)
+	{
+		Funprintf("--here--\n");
+		__wrn("--handle is NULL--\n");
+		return EPDK_FAIL;
+	}
+	if(!scene_para->man_manager)
+	{
+		__wrn("--scene_para->man_manager is NULL--\n");
+		return EPDK_FAIL;
+	}
+	if(!scene_para->hlyr)
+	{
+		__wrn("--scene_para->hlyr is NULL--\n");
+		return EPDK_FAIL;
+	}
+	GUI_LyrMove(scene_para->hlyr,Move_X,Move_Y);
+}
+

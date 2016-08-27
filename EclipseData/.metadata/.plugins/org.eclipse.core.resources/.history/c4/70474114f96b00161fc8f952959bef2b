@@ -1,0 +1,1980 @@
+
+#include "net_movie_play.h"
+
+static __s32  play_return = 0;
+static __s32  destory_play_ui = 0;
+static __s32 last_point_x = 0;
+__u8 movie_prog_tid ;
+__u8 prog_jump_flag = 0;
+extern char *cur_play_file;
+extern __s32 net_movie_control_amplifier_flag;
+
+static void net_movie_time2time( __u32 ms, net_movie_prog_time_t *format_time );
+__bool net_process_flag = 0;
+
+static net_movie_prog_viewer_ui_t  net_proc_ui_para =
+{
+	//Lyr_pos
+	{0, 380, 800, 100},
+	//Play_icon
+	{10, 10, 88, 100},
+	//Spsc_bg
+	{100, 0, 700, 100},
+	//Proc_bg
+	{150, 12, 599, 39},
+	//Cursor_pos
+	{154, 10, 41, 39},
+
+	//Cur time;
+	{168,53,0,0},
+	{178,53,0,0},
+	{188,53,0,0},
+	{191,53,0,0},
+	{201,53,0,0},
+	{211,53,0,0},
+	{214,53,0,0},
+	{224,53,0,0},
+
+	//Total time;
+	{672,53,0,0},
+	{682,53,0,0},
+	{692,53,0,0},
+	{695,53,0,0},
+	{705,53,0,0},
+	{715,53,0,0},
+	{718,53,0,0},
+	{728,53,0,0},
+};
+
+__s32 net_movie_cushion_bmp_id[]=
+{
+	ID_NET_EXPLORER_CUSHION0_BMP,
+	ID_NET_EXPLORER_CUSHION1_BMP,
+	ID_NET_EXPLORER_CUSHION2_BMP,
+	ID_NET_EXPLORER_CUSHION3_BMP,
+	ID_NET_EXPLORER_CUSHION4_BMP,
+	ID_NET_EXPLORER_CUSHION5_BMP,
+};
+static __s32 net_movie_prog_num[] = 
+{
+	ID_NET_EXPLORER_NUM0_BMP,
+	ID_NET_EXPLORER_NUM1_BMP,
+	ID_NET_EXPLORER_NUM2_BMP,
+	ID_NET_EXPLORER_NUM3_BMP,
+	ID_NET_EXPLORER_NUM4_BMP,
+	ID_NET_EXPLORER_NUM5_BMP,
+	ID_NET_EXPLORER_NUM6_BMP,
+	ID_NET_EXPLORER_NUM7_BMP,
+	ID_NET_EXPLORER_NUM8_BMP,
+	ID_NET_EXPLORER_NUM9_BMP,
+};
+
+static __s32 __net_movie_ctrl_para_init(net_movie_attr_t* net_movie_attr)
+{
+	if (!net_movie_attr)
+	{
+		return EPDK_FAIL;
+	}		
+    
+	net_movie_attr->hdisp = eLIBs_fopen("b:\\DISP\\DISPLAY", "r");
+	if (!net_movie_attr->hdisp)
+	{
+		__msg("open disp fail...\n");
+	}
+
+	{
+		__s32 ret;
+		__s32 screen_width, screen_height;
+		RECT vedio_rect;
+        robin_open_arg_t arg;
+        arg.reserve_mem_size = 512*1024;
+		ret = robin_open(ROBIN_MODE_VIDEO_MAX, &arg);
+		if(EPDK_OK != ret)
+		{
+			__msg("robin_open fail...\n");
+			return EPDK_FAIL;
+		}
+
+		dsk_display_get_size(&screen_width, &screen_height);
+		vedio_rect.x = 0;
+		vedio_rect.y = 0;
+		vedio_rect.width = screen_width;
+		vedio_rect.height = screen_height;
+		
+		net_movie_attr->hvedio_lyr = robin_request_video_layer(&vedio_rect, 0, 0xff);
+		if (!net_movie_attr->hvedio_lyr)
+		{
+			__msg("robin_request_vedio_layer fail...\n");
+			return EPDK_FAIL;
+		}
+		robin_set_zoom(ROBIN_ZOOM_FULL_SCREEN_SCREEN_RATIO);
+	}	
+
+ 	//..if (is_on_tv())
+ 	{
+ 		__u32 arg[3]={0};
+ 		arg[0] = net_movie_attr->hvedio_lyr;
+ 		eLIBs_fioctrl(net_movie_attr->hdisp, DISP_CMD_VIDEO_START, 0, (void*)arg);
+ 	}
+
+	{
+		__s32 ret;
+		__u32 arg[3]={0};
+
+		arg[0] = net_movie_attr->hvedio_lyr;
+		ret = eLIBs_fioctrl(net_movie_attr->hdisp, DISP_CMD_LAYER_BOTTOM, 0, (void*)arg);
+		if (0 != ret)
+		{
+		}
+		else
+		{
+		}		
+	}
+	
+	return EPDK_OK;
+}
+
+static __s32 __net_movie_ctrl_para_uninit(net_movie_attr_t* net_movie_attr)
+{
+	if (!net_movie_attr)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	{
+ 		__u32 arg[3]={0};
+
+ 		arg[0] = net_movie_attr->hvedio_lyr;
+ 		eLIBs_fioctrl(net_movie_attr->hdisp, DISP_CMD_VIDEO_STOP, 0, (void*)arg);
+ 	}
+	
+	if (net_movie_attr->hvedio_lyr)
+	{   
+		robin_release_video_layer(net_movie_attr->hvedio_lyr);
+		net_movie_attr->hvedio_lyr = NULL;
+	}
+
+	if (net_movie_attr->hdisp)
+	{
+		eLIBs_fclose(net_movie_attr->hdisp);
+		net_movie_attr->hdisp = NULL;
+	}
+	return EPDK_OK;
+}
+
+H_LYR net_movie_layer_32bpp_create(RECT rect , __s32 pipe)
+{
+
+	H_LYR layer = NULL;
+	FB  fb =
+	{
+	    {0, 0},                                   		/* size      */
+	    {0, 0, 0},                                      /* buffer    */
+	 //   {FB_TYPE_RGB, {PIXEL_MONO_8BPP, 0, (__rgb_seq_t)0}},    /* fmt       */
+	   {FB_TYPE_RGB, {PIXEL_COLOR_ARGB8888, 0, (__rgb_seq_t)0}},    /* fmt       */
+
+	};
+
+	__disp_layer_para_t lstlyr =
+	{
+	//    DISP_LAYER_WORK_MODE_PALETTE,                    /* mode      */
+	    DISP_LAYER_WORK_MODE_NORMAL,                    /* mode      */
+	    0,                                              /* ck_mode   */
+	    0,                                              /* alpha_en  */
+	    0,                                              /* alpha_val */
+	    1,                                              /* pipe      */
+	    0xff,                                           /* prio      */
+	    {0, 0, 0, 0},                           		/* screen    */
+	    {0, 0, 0, 0},                               	/* source    */
+	    DISP_LAYER_OUTPUT_CHN_DE_CH1,                   /* channel   */
+	    NULL                                            /* fb        */
+	};
+
+	__layerwincreate_para_t lyrcreate_info =
+	{
+	    "net movie layer",
+	    NULL,
+	    GUI_LYRWIN_STA_SLEEP,
+	    GUI_LYRWIN_NORMAL
+	};
+
+	fb.size.width		= rect.width;
+	fb.size.height		= rect.height;	
+	
+	lstlyr.src_win.x  		= 0;
+	lstlyr.src_win.y  		= 0;
+	lstlyr.src_win.width 		= rect.width;
+	lstlyr.src_win.height 	= rect.height;
+	
+	lstlyr.scn_win.x		= rect.x;
+	lstlyr.scn_win.y		= rect.y;
+	lstlyr.scn_win.width  	= rect.width;
+	lstlyr.scn_win.height 	= rect.height;
+	
+	lstlyr.pipe = pipe;
+	lstlyr.fb = &fb;
+	lyrcreate_info.lyrpara = &lstlyr;
+	
+	layer = GUI_LyrWinCreate(&lyrcreate_info);
+	if( !layer )
+	{
+		__wrn("app bar layer create error !\n");
+	} 
+		
+	return layer;	
+}
+
+void  net_movie_cmd2parent(__s32 id, __s32 data1, __s32 data2)
+{
+	__gui_msg_t msg;
+	msg.h_deswin = GUI_WinGetHandFromName("net expl list");
+	msg.h_srcwin = NULL;
+	msg.id = GUI_MSG_COMMAND;
+	msg.dwAddData1 = MAKELONG(NET_EXP_LIST_ID, id);
+	msg.dwAddData2 = data1;
+	msg.dwReserved = data2;
+	GUI_SendNotifyMessage(&msg);
+}
+
+
+static void  net_movie_cmd3parent(__s32 id, __s32 data1, __s32 data2)
+{
+	__gui_msg_t msg;
+	msg.h_deswin = GUI_WinGetHandFromName("net movie frame win");
+	msg.h_srcwin = NULL;
+	msg.id = GUI_MSG_COMMAND;
+	msg.dwAddData1 = MAKELONG(NET_MOVIE_FRM_ID, id);
+	msg.dwAddData2 = data1;
+	msg.dwReserved = data2;
+	GUI_SendNotifyMessage(&msg);
+}
+
+static __s32 net_movie_play_key_enter(__gui_msg_t *msg)
+{
+	net_movie_attr_t* net_movie_attr;
+	__cedar_status_t fsm_sta;
+	net_movie_attr = (net_movie_attr_t *)GUI_WinGetAttr(msg->h_deswin);	
+	if(net_movie_attr == NULL )
+	{
+		return EPDK_FAIL;
+	}
+	fsm_sta = robin_get_fsm_status();
+	if(CEDAR_STAT_PLAY == fsm_sta)
+	{
+		robin_set_cmd_pause();
+	}
+	else if(CEDAR_STAT_PAUSE == fsm_sta)
+	{
+		robin_set_cmd_play();
+	}
+	net_movie_cmd2parent(NET_EXP_MOVIE_MENU_CTAEATE,0,0);
+	gscene_hbar_set_state(HBAR_ST_SHOW);
+	return EPDK_OK;
+}
+static __s32 net_movie_play_key_escape(__gui_msg_t *msg)
+{
+	net_movie_attr_t* net_movie_attr;
+	net_movie_attr = (net_movie_attr_t *)GUI_WinGetAttr(msg->h_deswin);	
+	if(net_movie_attr == NULL )
+	{
+		return EPDK_FAIL;
+	}
+	eDbug("-----net_movie_play_key_escape------\n");
+	net_movie_cmd2parent(NET_EXP_MOVIE_DESTROY,0,0);
+	return EPDK_OK;
+}
+static __s32 net_movie_play_key_up(__gui_msg_t *msg)
+{
+	net_movie_attr_t* net_movie_attr;
+	net_movie_attr = (net_movie_attr_t *)GUI_WinGetAttr(msg->h_deswin);	
+	if(net_movie_attr == NULL )
+	{
+		return EPDK_FAIL;
+	}
+	return EPDK_OK;
+}
+static __s32 net_movie_play_key_down(__gui_msg_t *msg)
+{
+	net_movie_attr_t* net_movie_attr;
+	net_movie_attr = (net_movie_attr_t *)GUI_WinGetAttr(msg->h_deswin);	
+	if(net_movie_attr == NULL )
+	{
+		return EPDK_FAIL;
+	}
+	return EPDK_OK;
+}
+
+static __s32 net_movie_play_key_paint(__gui_msg_t *msg)
+{
+	net_movie_attr_t* net_movie_attr;
+	net_movie_attr = (net_movie_attr_t *)GUI_WinGetAttr(msg->h_deswin);	
+	if(net_movie_attr == NULL )
+	{
+		return EPDK_FAIL;
+	}
+	if(msg->dwAddData2 == KEY_UP_ACTION)
+	{
+		switch(msg->dwAddData1)
+		{
+			case GUI_MSG_KEY_ENTER:
+			{
+				net_movie_play_key_enter(msg);
+				break;
+			}
+			case GUI_MSG_KEY_ESCAPE:
+			{
+				net_movie_play_key_escape(msg);
+				break;
+			}
+			case GUI_MSG_KEY_VADD:
+			{		
+				dsk_volume_inc();
+				break;
+			}
+			case GUI_MSG_KEY_VDEC:
+			{				
+				dsk_volume_dec();
+				break;
+			}
+			case GUI_MSG_KEY_UP:
+			case GUI_MSG_KEY_RIGHT:
+			{
+				net_movie_play_key_up(msg);
+				break;
+			}
+			case GUI_MSG_KEY_DOWN:
+			case GUI_MSG_KEY_LEFT:
+			{
+				net_movie_play_key_down(msg);
+				break;
+			}
+			default:
+				break;
+		}
+	}
+	
+}
+
+static __s32  net_movie_tips_show(net_movie_attr_t *net_movie_attr, __u32 text_id)
+{
+	char					string[128];
+	GUI_RECT			gui_rect;
+	RECT					rect;
+	int						i;
+	H_LYR					hlyrTmp = NULL;
+
+	
+	dsk_langres_get_menu_text(text_id, string, sizeof(string));
+
+	rect.width = _W_SCR_ /3;
+	rect.height = _H_SCR_ /3;
+	rect.x = (_W_SCR_ -rect.width) /2;
+	rect.y = (_H_SCR_ -rect.height) /2;
+	if(NULL == net_movie_attr->movie_tip_layer)
+	{
+		net_movie_attr->movie_tip_layer = app_root_layer_create(rect,1);
+	}
+	
+	gui_rect.x0 = 0;
+	gui_rect.y0 = 0;
+	gui_rect.x1 = gui_rect.x0 +rect.width -1;
+	gui_rect.y1 = gui_rect.y0 +rect.height -1;
+	GUI_LyrWinSetSta(net_movie_attr->movie_tip_layer,GUI_LYRWIN_STA_ON);
+	GUI_LyrWinSel(net_movie_attr->movie_tip_layer);
+	
+	GUI_SetFont(SWFFont);
+	GUI_UC_SetEncodeUTF8();
+	GUI_SetDrawMode(LCD_DRAWMODE_TRANS);
+	GUI_SetBkColor(_ARGB(0xcc, 30, 30, 30)); 
+	GUI_SetColor(_ARGB(0xFF, 0xFF, 0xFF, 0xFF));	
+	GUI_ClearRectEx(&gui_rect);
+	GUI_DispStringInRectWrap(string, &gui_rect, GUI_TA_VCENTER | GUI_TA_HCENTER, GUI_WRAPMODE_WORD);
+	
+	GUI_LyrWinSetTop(net_movie_attr->movie_tip_layer);
+	return EPDK_OK;	
+}
+
+static __s32 net_movie_tips_delete(niet_movie_attr_t *net_movie_attr, __s32 delay)
+{
+	if(net_movie_attr == NULL)
+	{
+		return EPDK_FAIL;
+	}
+		
+	if(net_movie_attr->movie_tip_layer)
+	{
+		if(delay)
+			esKRNL_TimeDly(delay);
+		GUI_LyrWinDelete(net_movie_attr->movie_tip_layer);
+		net_movie_attr->movie_tip_layer = NULL;
+	}
+}
+
+static __s32 net_movie_play_time(__gui_msg_t *msg)
+{
+	net_movie_attr_t* net_movie_attr;
+	__cedar_status_t fsm_sta;
+	net_movie_attr = (net_movie_attr_t *)GUI_WinGetAttr(msg->h_deswin);
+	if(net_movie_attr == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	if(0 == play_return && prog_jump_flag == 0)
+	{
+		if (0 > robin_get_feedback_msg())
+		{
+		    robin_clear_feedback_msgQ();//清空错误信息消息队列
+            if (!destory_play_ui)
+            {
+				net_movie_tips_show(net_movie_attr, STRING_NETWORK_NOTLIST);	
+				net_movie_cmd2parent(NET_EXP_MOVIE_DESTROY,0,0);
+            }
+		   return EPDK_OK;
+		}
+		if(1 == robin_get_play_data_status()) //等待播放成功
+		{
+			net_explorer_delete_threader(net_movie_attr->list_para);
+			play_return = 1;
+			net_movie_cmd2parent(NET_EXP_MOVIE_MENU_CTAEATE,0,0);
+		}
+	}
+	else if(1 == play_return && prog_jump_flag == 0)
+	{
+		fsm_sta = robin_get_fsm_status();
+		if(CEDAR_STAT_PLAY == fsm_sta)
+		{
+		   if(1 != robin_get_play_data_status())
+		   {///加载中
+		   	 net_movie_tips_delete(net_movie_attr, 0);
+			  net_movie_cmd2parent(NET_EXP_LISTBAR_WAIT,0,0);
+		   }
+		   else
+		   {//加载完成
+			   net_movie_cmd2parent(NET_EXP_LISTBAR_WAIT_DESTROY,0,0);
+			   net_movie_tips_delete(net_movie_attr, 0);
+		   }
+		}
+		else if(CEDAR_STAT_PAUSE == fsm_sta)
+		{
+		   
+		}
+		else if(CEDAR_STAT_STOP== fsm_sta)
+		{
+		   net_movie_cmd2parent(NET_EXP_MOVIE_DESTROY,0,0);
+		}
+		else
+		{
+		
+		}
+	}
+	else
+	{
+		net_explorer_delete_threader(net_movie_attr->list_para);
+	}
+	return EPDK_OK;
+}
+
+static  __s32 net_Bmp_Get_Size(void* bmp_buf,__s32* p_width,__s32* p_height)
+{
+	HBMP hbmp = NULL;
+	if(bmp_buf == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	hbmp = bmp_open(bmp_buf);
+	if(hbmp)
+	{
+		*p_width = bmp_get_width(hbmp);
+		*p_height = bmp_get_height(hbmp);
+		bmp_close(hbmp);
+		__wrn("--Bmp_Get_Size sucess--\n");
+		return EPDK_OK;
+	}
+	else
+	{
+		__wrn("--Bmp_Get_Size fail--\n");
+		return EPDK_FAIL;
+	}
+}
+
+static __s32 Net_Movie_Paint_Volume(net_movie_attr_t* net_movie_attr)
+{
+	__s32 volume;
+	__s32 bright;
+	GUI_RECT text_rect;
+	HTHEME 	bg_bmp=NULL;
+	void    *bg_bmp_buf=NULL;
+	__s32 value = dsk_volume_get();
+	
+	if(net_movie_attr == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	if(GUI_LyrWinGetSta(net_movie_attr->volume_layer) != GUI_LYRWIN_STA_ON)
+	{
+		return EPDK_FAIL;
+	}
+	GUI_LyrWinSel(net_movie_attr->volume_layer);
+	
+   	if(!bg_bmp)
+	{
+		bg_bmp = dsk_theme_open(ID_INIT_VOLUME00_BMP+value);
+		bg_bmp_buf= dsk_theme_hdl2buf(bg_bmp);
+	}
+	GUI_BMP_Draw(bg_bmp_buf,0,0);
+	dsk_theme_close(bg_bmp);
+	bg_bmp=NULL;
+	bg_bmp_buf=NULL;
+	
+	GUI_LyrWinSetTop(net_movie_attr->volume_layer);
+}
+
+static __s32 net_touch_show_volume(net_movie_attr_t* net_movie_attr)
+{	
+	if(net_movie_attr == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	if(net_movie_attr->volume_layer == NULL)
+	{
+		__s32 screen_width,screen_height;
+		RECT rect;
+		dsk_display_get_size(&screen_width, &screen_height);
+		net_Bmp_Get_Size(net_movie_attr->volume_bmp_buf,&rect.width,&rect.height);	
+		rect.x = (screen_width - rect.width) / 2;
+		rect.y = (screen_height - rect.height) / 2;	
+		net_movie_attr->volume_layer = net_movie_layer_32bpp_create(rect,1);
+		if(!net_movie_attr->volume_layer)
+		{
+			__wrn("--vol_bri_layer fail--\n");
+			return EPDK_FAIL;
+		}
+		GUI_LyrWinSetTop(net_movie_attr->volume_layer);
+		GUI_LyrWinSetSta(net_movie_attr->volume_layer, GUI_LYRWIN_STA_ON); 
+	}
+	Net_Movie_Paint_Volume(net_movie_attr);
+	return EPDK_OK;
+}
+
+
+static __s32 net_movie_volume_set(__gui_msg_t *msg)
+{
+	__s32 x = 0, y = 0;
+	net_movie_attr_t* net_movie_attr;
+	x = LOSWORD(msg->dwAddData2);
+	y = HISWORD(msg->dwAddData2); 
+	//net_movie_attr = (net_movie_attr_t *)GUI_WinGetAttr(msg->h_deswin);
+	net_movie_attr = (net_movie_attr_t *)GUI_WinGetAttr(GUI_WinGetHandFromName("net movie frame win"));
+	if(net_movie_attr == NULL)
+	{
+		eDbug("---net_movie_attr == NULL---\n");
+		return EPDK_FAIL;
+	}
+	//if ( x < (net_movie_attr->touch_x_y.x + NET_TOCHAH_OFF) && x > (net_movie_attr->touch_x_y.x - NET_TOCHAH_OFF) )
+	{
+		Funprintf("--here--\n");
+		if(y < net_movie_attr->touch_x_y.y - NET_TOCHAH_MOVE && net_movie_attr->net_movie_down_flag == EPDK_TRUE
+			&& net_movie_attr->net_movie_move_flag == EPDK_TRUE)
+		{///加
+		
+			Funprintf("--here--\n");
+			net_movie_attr->touch_x_y.x = x;
+			net_movie_attr->touch_x_y.y = y;
+			dsk_volume_inc();
+			net_touch_show_volume(net_movie_attr);
+			return EPDK_OK;
+		}
+		else if(y > net_movie_attr->touch_x_y.y + NET_TOCHAH_MOVE && net_movie_attr->net_movie_down_flag == EPDK_TRUE
+			&& net_movie_attr->net_movie_move_flag == EPDK_TRUE)
+		{///减
+			Funprintf("--here--\n");
+			net_movie_attr->touch_x_y.x = x;
+			net_movie_attr->touch_x_y.y = y;
+			dsk_volume_dec();
+			net_touch_show_volume(net_movie_attr);
+			return EPDK_OK;
+		}
+	}
+	return EPDK_FAIL;
+}
+static __s32 net_movie_delete_volume(net_movie_attr_t* net_movie_attr)
+{
+	if(net_movie_attr->volume_layer)
+	{
+		GUI_LyrWinDelete(net_movie_attr->volume_layer);
+		net_movie_attr->volume_layer = NULL;
+		return EPDK_OK;
+	}
+	return EPDK_FAIL;
+}
+
+static __s32 net_movie_frm_touch_proc(__gui_msg_t *msg)
+{
+	__s32 x = 0, y = 0;
+	__s8 ret;
+	net_movie_attr_t* net_movie_attr;
+	net_movie_prog_attr_t *net_movie_prog_attr;
+	net_movie_attr = (net_movie_attr_t *)GUI_WinGetAttr(msg->h_deswin);	
+  	net_movie_prog_attr = (net_movie_prog_attr_t *)GUI_WinGetAttr(GUI_WinGetHandFromName("net movie menu win"));
+	if(net_movie_attr == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	x = LOSWORD(msg->dwAddData2);
+	y = HISWORD(msg->dwAddData2);
+	switch(msg->dwAddData1)
+	{
+		case GUI_MSG_TOUCH_OVERUP:
+		case GUI_MSG_TOUCH_UP:
+		{	
+			if(GUI_WinGetCaptureWin() == msg->h_deswin)
+			{
+			    GUI_WinReleaseCapture();
+			}
+			if(net_movie_attr->net_movie_down_flag == EPDK_TRUE && net_movie_attr->net_movie_move_flag == EPDK_TRUE)
+			{
+				if(net_movie_delete_volume(net_movie_attr) == EPDK_OK)
+				{
+					net_movie_attr->net_movie_down_flag = EPDK_FALSE;
+					net_movie_attr->net_movie_move_flag = EPDK_FALSE;
+					return EPDK_OK;
+				}
+			}
+			if(play_return == 1)
+			{
+                /*进度条*/
+				/*if(net_movie_attr->list_para->movie_menu == NULL)
+				{
+					net_movie_cmd2parent(NET_EXP_MOVIE_MENU_CTAEATE,0,0);
+					
+				}*/
+
+			}
+			if(net_process_flag == 0)
+			{
+				if(GUI_WinGetHandFromName("net movie menu win"))
+				{
+					gscene_hbar_set_state(HBAR_ST_SHOW);	
+					GUI_LyrMove(net_movie_prog_attr->movie_prog_layer,0,-250);
+					net_process_flag = 1;
+					GUI_WinSetFocusChild(GUI_WinGetHandFromName("net movie menu win"));
+				}
+			}
+			net_movie_attr->net_movie_down_flag = EPDK_FALSE;
+			net_movie_attr->net_movie_move_flag = EPDK_FALSE;
+			break;
+		}
+		case GUI_MSG_TOUCH_OVERDOWN:
+		case GUI_MSG_TOUCH_DOWN:
+		case GUI_MSG_TOUCH_LONGDOWN:
+		{
+			if (GUI_WinGetCaptureWin() != msg->h_deswin)
+			{
+	      		GUI_WinSetCaptureWin(msg->h_deswin);
+			}
+			net_movie_attr->net_movie_down_flag = EPDK_TRUE;
+			net_movie_attr->net_movie_move_flag = EPDK_FALSE;
+			break;
+		}
+		case GUI_MSG_TOUCH_MOVE:
+		{
+			if(net_movie_attr->net_movie_down_flag == EPDK_TRUE)
+			{
+				net_movie_attr->net_movie_move_flag = EPDK_TRUE;
+				ret = net_movie_volume_set(msg);
+				if(ret == EPDK_OK)
+				{
+					return EPDK_OK;
+				}
+			}
+			break;
+		}
+		default:
+			break;
+	}	
+	return EPDK_OK;
+}
+static __s32 net_movie_source_init(__gui_msg_t *msg)
+{
+	net_movie_attr_t* net_movie_attr;
+	net_movie_attr = (net_movie_attr_t *)GUI_WinGetAttr(msg->h_deswin);	
+	if(net_movie_attr == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	if(!net_movie_attr->volume_bmp)
+	{
+//		net_movie_attr->volume_bmp = dsk_theme_open(ID_MOVIE_TP_VOLUME_BMP);
+//		net_movie_attr->volume_bmp_buf = dsk_theme_hdl2buf(net_movie_attr->volume_bmp);
+	}
+	return EPDK_OK;
+}
+static __s32 net_movie_source_uninit(__gui_msg_t *msg)
+{
+	net_movie_attr_t* net_movie_attr;
+	net_movie_attr = (net_movie_attr_t *)GUI_WinGetAttr(msg->h_deswin);	
+	if(net_movie_attr == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	if(net_movie_attr->volume_bmp)
+	{
+		dsk_theme_close(net_movie_attr->volume_bmp);
+		net_movie_attr->volume_bmp = NULL;
+		net_movie_attr->volume_bmp_buf = NULL;
+	}
+	if(net_movie_attr->movie_tip_layer)
+	{
+		GUI_LyrWinDelete(net_movie_attr->movie_tip_layer);
+		net_movie_attr->movie_tip_layer = NULL;
+	}
+	if(net_movie_attr->volume_layer)
+	{
+		GUI_LyrWinDelete(net_movie_attr->volume_layer);
+		net_movie_attr->volume_layer = NULL;
+		return EPDK_OK;
+	}
+	return EPDK_OK;
+}
+
+static __s32 net_move_frm_command(__gui_msg_t *msg)
+{
+	net_movie_attr_t* net_movie_attr;
+	net_movie_attr = (net_movie_attr_t *)GUI_WinGetAttr(msg->h_deswin);	
+	if(net_movie_attr == NULL)
+	{
+		return EPDK_OK;
+	}
+	switch(LOWORD(msg->dwAddData1))
+	{
+		case NET_MOVIE_FRM_ID:
+		{
+			switch(HIWORD(msg->dwAddData1))
+			{
+				case NET_PLAY_JUMP_FAIL:
+				{
+					net_movie_tips_show(net_movie_attr, STRING_NET_JUMP_FAIL);
+					net_movie_tips_delete(net_movie_attr, 100);
+					break;
+				}
+				case NET_PLAY_JUMP_OK:
+				{
+					gscene_hbar_set_state(HBAR_ST_HIDE);
+					break;
+				}
+				default:
+					break;
+			}
+		}
+		default:
+			break;
+	}
+}
+
+static __s32 net_movie_Frmwin_Proc(__gui_msg_t *msg)
+{
+	switch(msg->id)
+	{
+		case GUI_MSG_CREATE:
+		{
+			__s32 ret;
+			net_movie_attr_t* net_movie_attr;
+			gscene_hbar_set_state(HBAR_ST_HIDE);
+			net_movie_attr = (net_movie_attr_t *)GUI_WinGetAttr(msg->h_deswin);	
+			if(net_movie_attr == NULL)
+			{
+				return EPDK_OK;
+			}
+			cacti_start_get_octet_stream();
+			gscene_bgd_set_state(BGD_STATUS_HIDE);
+			play_return = 0;
+            destory_play_ui = 0;			
+			prog_jump_flag = 0;
+			net_movie_source_init(msg);
+			__net_movie_ctrl_para_init(net_movie_attr);
+            com_set_palette_by_id(ID_MOVIE_PAL_BMP);//设置调色板
+
+            {//修改调色板
+                //背景色，灰白色，字幕边框颜色
+				__u32 color[]={BEETLES_BLACK_COLOR, BEETLES_GRAY_COLOR, 0xC0323232};
+				com_set_palette_color_by_index(0xF0, color, BEETLES_TBL_SIZE(color));			
+			}	
+            robin_set_cmd_stop();		
+			Funprintf("--here--\n");
+			//net_movie_cmd2parent(NET_EXP_LISTBAR_WAIT,0,0);
+			Funprintf("--here--\n");
+			//net_movie_cmd2parent(NET_EXP_MOVIE_MENU_CTAEATE,0,0);
+			net_process_flag = 1;
+			
+			if(eLIBs_strlen(cur_play_file))
+			{
+				//esKSRV_SysInfo();
+                robin_set_cmd_play_file(cur_play_file, NULL);
+			}
+			else
+			{
+				__wrn("cur_play_file is null\n");
+			}
+			dsk_amplifier_onoff(BEETLES_SPEAK_ON);
+	        net_movie_control_amplifier_flag = 1;	
+			Funprintf("--here--\n");
+			GUI_SetTimer(msg->h_deswin,MOVIE_MUSIC_TEST_STA_TimerId,MOVIE_MUSIC_TEST_STA_INTERVAL,NULL);				
+	        return EPDK_OK;
+	    }
+		case GUI_MSG_PAINT:
+		{
+			return EPDK_OK;
+		}
+		case GUI_MSG_CLOSE:
+		{
+			GUI_FrmWinDelete(msg->h_deswin);
+		}
+		return EPDK_OK;
+		case GUI_MSG_DESTROY:
+		{
+			net_movie_attr_t* net_movie_attr;
+			net_movie_attr = (net_movie_attr_t *)GUI_WinGetAttr(msg->h_deswin);	
+			if(net_movie_attr == NULL)
+			{
+				return EPDK_FAIL;
+			}
+			destory_play_ui = 1;
+			play_return = 2;
+			net_movie_attr->net_movie_protect_flag = 1;
+			cacti_stop_get_octet_stream();
+			if(GUI_IsTimerInstalled(msg->h_deswin, MOVIE_MUSIC_TEST_STA_TimerId))
+			{
+				GUI_KillTimer(msg->h_deswin, MOVIE_MUSIC_TEST_STA_TimerId);    
+			}
+            robin_clear_feedback_msgQ();
+			net_movie_tips_show(net_movie_attr, STRING_NETWORK_EXIT);		
+			robin_set_cmd_stop();		
+			net_movie_tips_delete(net_movie_attr, 0);
+			if(movie_prog_tid)
+			{
+				while(1)
+				{
+					if(esKRNL_TDelReq(movie_prog_tid) == OS_TASK_NOT_EXIST)
+					{
+						break;
+					}
+					esKRNL_TimeDly(1);
+				}
+				movie_prog_tid = NULL;
+				prog_jump_flag = 0;
+			}
+			__net_movie_ctrl_para_uninit(net_movie_attr);
+			net_movie_source_uninit(msg);
+			robin_close();
+			if(net_movie_attr)
+			{
+				esMEMS_Mfree(0,net_movie_attr);
+				net_movie_attr=NULL;
+			}
+			net_movie_control_amplifier_flag = 0;
+			cacti_start_get_octet_stream();
+			gscene_hbar_set_text(HB_APP_ONLINE);
+			gscene_hbar_set_state(HBAR_ST_SHOW);
+		}
+		return EPDK_OK;
+
+		case GUI_MSG_KEY:
+		{
+	    	net_movie_play_key_paint(msg);
+			return EPDK_OK;
+	    }
+		case GUI_MSG_TOUCH:
+        {
+			net_movie_frm_touch_proc(msg);
+            return EPDK_OK;
+        }
+		case GUI_MSG_COMMAND:
+        {
+			net_move_frm_command(msg);
+			return EPDK_OK;
+	    }
+		case GUI_MSG_TIMER:
+        {
+			net_movie_play_time(msg);
+			return EPDK_OK;
+        }	
+		case DSK_MSG_WIFI_PART_UNLINKING:
+		{
+			return EPDK_OK;
+		}
+	
+		default:
+			break;
+	}
+	return EPDK_OK;	
+}
+
+
+H_WIN net_movie_frame_win_create(H_WIN h_parent,net_expl_list *list_para)
+{
+	__gui_framewincreate_para_t framewin_para;
+	net_movie_attr_t *net_movie_attr;
+	H_WIN win = NULL;
+	RECT rect;
+	FB fb;
+
+	rat_stop_miniature_decode();//..务必停止
+	net_movie_attr = (net_movie_attr_t *)esMEMS_Malloc(0,sizeof(net_movie_attr_t));
+	if(!net_movie_attr)//..
+	{
+		eDbug("memory balloc fail.........\n");
+		return EPDK_FAIL;
+	}
+	eLIBs_memset((void*)net_movie_attr, 0, sizeof(net_movie_attr_t));//..
+	rect.x = 0;
+	rect.y = 0;
+	rect.width = 5;
+	rect.height = 5;
+	net_movie_attr->movie_layer = net_movie_layer_32bpp_create(rect,0);//..
+	net_movie_attr->list_para = list_para;
+	GUI_LyrWinGetFB(net_movie_attr->movie_layer,&fb);
+	eLIBs_memset(&framewin_para, 0, sizeof(__gui_framewincreate_para_t));
+	framewin_para.name =	"net movie frame win";
+	framewin_para.dwExStyle = WS_EX_NONE;
+	framewin_para.dwStyle = WS_NONE|WS_VISIBLE;
+	framewin_para.spCaption =  NULL;
+	framewin_para.hOwner	= NULL;
+	framewin_para.id         = NET_MOVIE_FRM_ID;
+	framewin_para.hHosting = h_parent;
+	framewin_para.FrameWinProc = (__pGUI_WIN_CB)esKRNL_GetCallBack((__pCBK_t)net_movie_Frmwin_Proc);
+	framewin_para.rect.x =0;
+	framewin_para.rect.y = 0;
+	framewin_para.rect.width= fb.size.width;
+	framewin_para.rect.height = fb.size.height;
+	framewin_para.BkColor.alpha =  0;
+	framewin_para.BkColor.red = 0;
+	framewin_para.BkColor.green = 0;
+	framewin_para.BkColor.blue = 0;
+	framewin_para.attr =  (void *)net_movie_attr;
+	framewin_para.hLayer = net_movie_attr->movie_layer;
+	win = GUI_FrmWinCreate(&framewin_para);
+	if( win == NULL )
+	{
+		eDbug("cook_frw create fail cook_attr free\n");
+		GUI_LyrWinDelete(net_movie_attr->movie_layer);
+		esMEMS_Bfree(net_movie_attr, sizeof(net_movie_attr_t));
+		net_movie_attr = NULL;
+        return NULL;
+	}	
+	return win;
+}
+void net_movie_frame_win_destory(H_WIN h_win)
+{
+	net_movie_attr_t* net_movie_attr;
+	net_movie_attr = (net_movie_attr_t *)GUI_WinGetAttr(h_win);	
+	if(net_movie_attr == NULL)
+	{
+		return ;
+	}
+	if(net_movie_attr->movie_layer)
+	{
+		GUI_LyrWinDelete(net_movie_attr->movie_layer);
+		net_movie_attr->movie_layer = NULL;
+	}
+}
+
+static void  net_movie_prog_init_bmp(net_movie_prog_attr_t*  net_movie_prog_attr)
+{
+	__u8 i;
+	if(!net_movie_prog_attr->prog_bg)
+	{
+		net_movie_prog_attr->prog_bg = dsk_theme_open(ID_NET_EXPLORER_PROG_BG_BMP);
+		net_movie_prog_attr->prog_bg_buf = dsk_theme_hdl2buf(net_movie_prog_attr->prog_bg);
+	}
+	if(!net_movie_prog_attr->under_bg)
+	{
+		net_movie_prog_attr->under_bg= dsk_theme_open(ID_NET_EXPLORER_PROGRESSBAR_BG_BMP);
+		net_movie_prog_attr->under_bg_buf= dsk_theme_hdl2buf(net_movie_prog_attr->under_bg);
+	}
+	if(!net_movie_prog_attr->prog_cursor)
+	{
+		net_movie_prog_attr->prog_cursor = dsk_theme_open(ID_NET_EXPLORER_PROG_CURSOR_BMP);
+		net_movie_prog_attr->prog_cursor_buf = dsk_theme_hdl2buf(net_movie_prog_attr->prog_cursor);
+	}
+	if(!net_movie_prog_attr->prog_left)
+	{
+		net_movie_prog_attr->prog_left = dsk_theme_open(ID_NET_EXPLORER_PROG_LEFT_BMP);
+		net_movie_prog_attr->prog_left_buf = dsk_theme_hdl2buf(net_movie_prog_attr->prog_left);
+	}
+	if(!net_movie_prog_attr->prog_right)
+	{
+		net_movie_prog_attr->prog_right = dsk_theme_open(ID_NET_EXPLORER_PROG_LEFT_BMP);
+		net_movie_prog_attr->prog_right_buf = dsk_theme_hdl2buf(net_movie_prog_attr->prog_right);
+	}
+	if(!net_movie_prog_attr->prog_mid)
+	{
+		net_movie_prog_attr->prog_mid = dsk_theme_open(ID_NET_EXPLORER_PROG_MID_BMP);
+		net_movie_prog_attr->prog_mid_buf = dsk_theme_hdl2buf(net_movie_prog_attr->prog_mid);
+	}
+    if(!net_movie_prog_attr->net_movie_escape)
+	{
+		net_movie_prog_attr->net_movie_escape = dsk_theme_open(ID_NET_EXPLORER_ESCAPE_BMP);
+		net_movie_prog_attr->net_movie_escape_buf = dsk_theme_hdl2buf(net_movie_prog_attr->net_movie_escape);
+	}
+	if(!net_movie_prog_attr->net_movie_play)
+	{
+		net_movie_prog_attr->net_movie_play= dsk_theme_open(ID_NET_EXPLORER_PLAY_BMP);
+    	net_movie_prog_attr->net_movie_play_buf = dsk_theme_hdl2buf(net_movie_prog_attr->net_movie_play);
+	}
+
+	if(!net_movie_prog_attr->net_movie_pause)
+	{
+		net_movie_prog_attr->net_movie_pause= dsk_theme_open(ID_NET_EXPLORER_PAUSE_BMP);
+		net_movie_prog_attr->net_movie_pause_buf = dsk_theme_hdl2buf(net_movie_prog_attr->net_movie_pause);
+	}
+	for(i = 0;i < 10; i++)
+	{
+		net_movie_prog_attr->time_digital[i] = dsk_theme_open(net_movie_prog_num[i]);
+		net_movie_prog_attr->time_digital_buf[i] = dsk_theme_hdl2buf(net_movie_prog_attr->time_digital[i]);	
+	}
+	if(!net_movie_prog_attr->time_clono)
+	{
+		net_movie_prog_attr->time_clono = dsk_theme_open(ID_NET_EXPLORER_TIME_CLONO_BMP);
+		net_movie_prog_attr->time_clono_buf = dsk_theme_hdl2buf(net_movie_prog_attr->time_clono);	
+	}
+}
+static void net_movie_prog_uninit_bmp(net_movie_prog_attr_t*  net_movie_prog_attr)
+{
+	__s32 i;
+	if(net_movie_prog_attr->prog_bg)
+	{
+		dsk_theme_close(net_movie_prog_attr->prog_bg);
+		net_movie_prog_attr->prog_bg=NULL;
+		net_movie_prog_attr->prog_bg_buf=NULL;
+	}
+
+	if(net_movie_prog_attr->under_bg)
+	{
+		dsk_theme_close(net_movie_prog_attr->under_bg);
+		net_movie_prog_attr->under_bg=NULL;
+		net_movie_prog_attr->under_bg_buf=NULL;
+	}
+	
+	if(net_movie_prog_attr->prog_cursor)
+	{
+		dsk_theme_close(net_movie_prog_attr->prog_cursor);
+		net_movie_prog_attr->prog_cursor=NULL;
+		net_movie_prog_attr->prog_cursor_buf=NULL;
+	}
+	if(net_movie_prog_attr->prog_left)
+	{
+		dsk_theme_close(net_movie_prog_attr->prog_left);
+		net_movie_prog_attr->prog_left=NULL;
+		net_movie_prog_attr->prog_left_buf=NULL;
+	}
+	if(net_movie_prog_attr->prog_right)
+	{
+		dsk_theme_close(net_movie_prog_attr->prog_right);
+		net_movie_prog_attr->prog_right=NULL;
+		net_movie_prog_attr->prog_right_buf=NULL;
+	}
+	if(net_movie_prog_attr->prog_mid)
+	{
+		dsk_theme_close(net_movie_prog_attr->prog_mid);
+		net_movie_prog_attr->prog_mid=NULL;
+		net_movie_prog_attr->prog_mid_buf=NULL;
+	}
+
+	if( net_movie_prog_attr->net_movie_play != NULL )
+    {
+        dsk_theme_close(net_movie_prog_attr->net_movie_play);
+       	net_movie_prog_attr->net_movie_play = NULL;
+	     net_movie_prog_attr->net_movie_play_buf = NULL;
+    }
+
+	if( net_movie_prog_attr->net_movie_pause != NULL )
+    {
+        dsk_theme_close(net_movie_prog_attr->net_movie_pause);
+       	net_movie_prog_attr->net_movie_pause = NULL;
+	     net_movie_prog_attr->net_movie_pause_buf = NULL;
+    }
+
+	if(net_movie_prog_attr->net_movie_escape)
+	{
+		dsk_theme_close(net_movie_prog_attr->net_movie_escape);
+       	net_movie_prog_attr->net_movie_escape = NULL;
+	    net_movie_prog_attr->net_movie_escape_buf = NULL;
+	}
+
+	for(i=0;i<10;i++)
+	{
+		if( net_movie_prog_attr->time_digital[i] != NULL )
+	    {
+	        dsk_theme_close(net_movie_prog_attr->time_digital[i]);
+	       	net_movie_prog_attr->time_digital[i] = NULL;
+		    net_movie_prog_attr->time_digital_buf[i] = NULL;
+	    }
+	}
+	if( net_movie_prog_attr->time_clono != NULL )
+    {
+        dsk_theme_close(net_movie_prog_attr->time_clono);
+       	net_movie_prog_attr->time_clono = NULL;
+	    net_movie_prog_attr->time_clono_buf = NULL;
+    }
+}
+static __s32 show_total_time_with_digital_pic(net_movie_prog_attr_t*  net_movie_prog_attr,__s32 hour,__s32 minute,__s32 second)
+{
+	if(hour<0 || minute<0|| second<0)
+	{
+		return EPDK_FAIL;
+	}
+	if(hour>9&&hour<25)//hour
+	{
+		__s32 shi,ge;
+		shi = hour/10;
+		ge  = hour%10;
+
+		GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[shi], net_proc_ui_para.total_hour_shi.x0, net_proc_ui_para.total_hour_shi.y0);	
+
+		GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[ge], net_proc_ui_para.total_hour_ge.x0, net_proc_ui_para.total_hour_ge.y0);	
+	}
+	else if(hour<10)
+	{
+		
+		GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[0], net_proc_ui_para.total_hour_shi.x0, net_proc_ui_para.total_hour_shi.y0);	
+		GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[hour], net_proc_ui_para.total_hour_ge.x0, net_proc_ui_para.total_hour_ge.y0);	
+	}
+	else
+	{
+		return EPDK_FAIL;
+	}
+	
+   GUI_BMP_Draw(net_movie_prog_attr->time_clono_buf, net_proc_ui_para.total_colon0.x0, net_proc_ui_para.total_colon0.y0);	
+
+   if(minute>9&&minute<60)//minute
+	{
+		__s32 shi,ge;
+		shi = minute/10;
+		ge  = minute%10;
+		
+		GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[shi], net_proc_ui_para.total_minute_shi.x0, net_proc_ui_para.total_minute_shi.y0);	
+		GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[ge], net_proc_ui_para.total_minute_ge.x0, net_proc_ui_para.total_minute_ge.y0);	
+	}
+	else if(minute<10)
+	{
+		GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[0], net_proc_ui_para.total_minute_shi.x0, net_proc_ui_para.total_minute_shi.y0);	
+		GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[minute], net_proc_ui_para.total_minute_ge.x0, net_proc_ui_para.total_minute_ge.y0);	
+	}
+	else
+	{
+		return EPDK_FAIL;
+	}
+
+   GUI_BMP_Draw(net_movie_prog_attr->time_clono_buf, net_proc_ui_para.total_colon1.x0, net_proc_ui_para.total_colon1.y0);
+
+   if(second>9&&second<60)//second
+   {
+	   __s32 shi,ge;
+	   shi = second/10;
+	   ge  = second%10;
+	   GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[shi], net_proc_ui_para.total_second_shi.x0, net_proc_ui_para.total_second_shi.y0); 
+	   GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[ge], net_proc_ui_para.total_second_ge.x0, net_proc_ui_para.total_second_ge.y0);    
+   }
+   else if(second<10)
+   {
+	   GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[0], net_proc_ui_para.total_second_shi.x0, net_proc_ui_para.total_second_shi.y0);   
+	   GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[second], net_proc_ui_para.total_second_ge.x0, net_proc_ui_para.total_second_ge.y0);    
+   }
+   else
+   {
+	   return EPDK_FAIL;
+   }
+   return EPDK_OK;
+}
+
+static __s32 show_cur_time_with_digital_pic(net_movie_prog_attr_t*  net_movie_prog_attr,__s32 hour,__s32 minute,__s32 second)
+{
+	if(hour<0 || minute<0|| second<0)
+	{
+		return EPDK_FAIL;
+	}
+	if(hour>9&&hour<25)
+	{
+		__s32 shi,ge;
+		shi = hour/10;
+		ge  = hour%10;
+		GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[shi], net_proc_ui_para.cur_hour_shi.x0, net_proc_ui_para.cur_hour_shi.y0);	
+		GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[ge], net_proc_ui_para.cur_hour_ge.x0, net_proc_ui_para.cur_hour_ge.y0);	
+	}
+	else if(hour<10)
+	{
+		GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[0], net_proc_ui_para.cur_hour_shi.x0, net_proc_ui_para.cur_hour_shi.y0);	
+		GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[hour], net_proc_ui_para.cur_hour_ge.x0, net_proc_ui_para.cur_hour_ge.y0);	
+	}
+	else
+	{
+		return EPDK_FAIL;
+	}
+	
+   GUI_BMP_Draw(net_movie_prog_attr->time_clono_buf, net_proc_ui_para.cur_colon0.x0, net_proc_ui_para.cur_colon0.y0);	
+
+   if(minute>9&&minute<60)
+	{
+		__s32 shi,ge;
+		shi = minute/10;
+		ge  = minute%10;
+		GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[shi], net_proc_ui_para.cur_minute_shi.x0, net_proc_ui_para.cur_minute_shi.y0);	
+		GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[ge], net_proc_ui_para.cur_minute_ge.x0, net_proc_ui_para.cur_minute_ge.y0);	
+	}
+	else if(minute<10)
+	{
+		GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[0], net_proc_ui_para.cur_minute_shi.x0, net_proc_ui_para.cur_minute_shi.y0);	
+		GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[minute], net_proc_ui_para.cur_minute_ge.x0, net_proc_ui_para.cur_minute_ge.y0);	
+	}
+	else
+	{
+		return EPDK_FAIL;
+	}
+
+   GUI_BMP_Draw(net_movie_prog_attr->time_clono_buf, net_proc_ui_para.cur_colon1.x0, net_proc_ui_para.cur_colon1.y0);
+
+   if(second>9&&second<60)//second
+   {
+	   __s32 shi,ge;
+	   shi = second/10;
+	   ge  = second%10;
+	   GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[shi], net_proc_ui_para.cur_second_shi.x0, net_proc_ui_para.cur_second_shi.y0); 
+	   GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[ge], net_proc_ui_para.cur_second_ge.x0, net_proc_ui_para.cur_second_ge.y0);    
+   }
+   else if(second<10)
+   {
+	   GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[0], net_proc_ui_para.cur_second_shi.x0, net_proc_ui_para.cur_second_shi.y0);   
+	   GUI_BMP_Draw(net_movie_prog_attr->time_digital_buf[second], net_proc_ui_para.cur_second_ge.x0, net_proc_ui_para.cur_second_ge.y0);    
+   }
+   else
+   {
+	   return EPDK_FAIL;
+   }
+   return EPDK_OK;
+}
+
+static void net_movie_time2time( __u32 ms, net_movie_prog_time_t *format_time )
+{
+	__u32  total_minute;
+	__u32 second_time;
+	
+	second_time = ms/1000;
+	total_minute = second_time/60;
+	
+	format_time->data1.second = second_time%60;
+	format_time->data1.minute = total_minute%60;
+	format_time->data1.hour   = total_minute/60;	
+}
+
+static __s32 net_movie_prog_update(net_movie_prog_attr_t*  net_movie_prog_attr)										 
+{
+    GUI_MEMDEV_Handle draw_mem;
+	__s32 i;
+	__s32 n;
+	net_movie_prog_time_t format_time0,format_time1;
+	
+	char str_cur_time[32]={0};
+	char str_total_time[32]={0};
+	if (!net_movie_prog_attr)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+
+	if (GUI_LYRWIN_STA_ON != GUI_LyrWinGetSta(net_movie_prog_attr->movie_prog_layer))
+	{
+		__msg("GUI_LYRWIN_STA_ON != GUI_LyrWinGetSta(scene_para->hlyr), do not paint...\n");
+		return EPDK_FAIL;
+	}
+	eDbug("-- net_process_flag = %d -- \n", net_process_flag);
+	if(net_process_flag == 0 || prog_jump_flag == 1)
+	{
+		return EPDK_FAIL;
+	}
+	net_movie_prog_attr->current_time = robin_get_cur_time();
+	net_movie_prog_attr->total_time = robin_get_total_time();
+	if(net_movie_prog_attr->current_time > net_movie_prog_attr->total_time)
+	{
+	   net_movie_prog_attr->current_time = net_movie_prog_attr->total_time; 
+	}
+	if (net_movie_prog_attr->current_time <= 0 || net_movie_prog_attr->total_time <= 0)
+	{
+		n = 0;
+	}
+	else
+	{
+		n = ((net_proc_ui_para.Proc_bg.width-net_proc_ui_para.Cursor_pos.width) * net_movie_prog_attr->current_time)
+			/(PROG_MID_WIDTH * net_movie_prog_attr->total_time);
+	}
+	
+	net_movie_time2time(net_movie_prog_attr->current_time, &format_time0);
+	net_movie_time2time(net_movie_prog_attr->total_time, &format_time1);
+
+	GUI_LyrWinSel(net_movie_prog_attr->movie_prog_layer);
+
+    //背景
+
+    GUI_UC_SetEncodeUTF8();
+	GUI_SetColor(GUI_WHITE);
+    GUI_SetFont(SWFFont);
+    GUI_SetDrawMode(GUI_DRAWMODE_NORMAL);
+	draw_mem = GUI_MEMDEV_Create(0, 0, net_proc_ui_para.Lyr_pos.width, net_proc_ui_para.Lyr_pos.height);
+	GUI_MEMDEV_Select(draw_mem);
+	//当前时间
+	show_cur_time_with_digital_pic(net_movie_prog_attr,format_time0.data1.hour,format_time0.data1.minute,format_time0.data1.second);
+	show_total_time_with_digital_pic(net_movie_prog_attr,format_time1.data1.hour,format_time1.data1.minute,format_time1.data1.second);
+
+	if(!(n<0))
+	{
+		//画进度条
+		{
+			if (net_movie_prog_attr->prog_bg_buf)
+			{
+			  
+			   GUI_BMP_Draw(net_movie_prog_attr->prog_bg_buf, 150, 12);				
+			}
+		}
+		/*
+		for (i = 0 ; i < n ; i++)
+		{
+			if(i==0)
+			{
+				GUI_BMP_Draw(net_movie_prog_attr->prog_left_buf, 150, 32);
+				
+			}
+			else
+			{
+			   GUI_BMP_Draw(net_movie_prog_attr->prog_mid_buf, 150+i*PROG_MID_WIDTH, 32);
+			}
+		}
+
+		
+		if(i==0)
+		{
+			GUI_BMP_Draw(net_movie_prog_attr->prog_left_buf, 150, 32);
+			
+		}
+		else
+		{
+			if((n-1)*PROG_MID_WIDTH<PROG_REAL_BG_WIDTH-4)
+			{
+				GUI_BMP_Draw(net_movie_prog_attr->prog_cursor_buf, 150+(i)*PROG_MID_WIDTH, 12);
+			}
+		}*/
+		
+	}
+	//Funprintf("--1 net timer n = %d--\n",n);
+	//if(n>1)
+		GUI_BMP_Draw(net_movie_prog_attr->prog_cursor_buf,net_proc_ui_para.Cursor_pos.x +(n-1)*PROG_MID_WIDTH,net_proc_ui_para.Cursor_pos.y);
+    GUI_MEMDEV_CopyToLCD_Ex(draw_mem);
+	GUI_MEMDEV_Select(NULL);
+	GUI_MEMDEV_Delete(draw_mem);
+    draw_mem=NULL;
+	return EPDK_OK;
+}
+
+static __s32 net_movie_prog_install_timmer(net_movie_prog_attr_t*  net_movie_prog_attr,H_WIN frame_win)
+{
+	if (!net_movie_prog_attr)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}	
+	
+	if (!GUI_IsTimerInstalled(frame_win, NET_MOVIE_TIME_PROGRESS_ID))
+	{
+		GUI_SetTimer(frame_win, NET_MOVIE_TIME_PROGRESS_ID, NET_MOVIE_TIME_PROGRESS_TIME, NULL);		
+	}
+	if(!GUI_IsTimerInstalled(frame_win, NET_PROGCESS_TIMERID))
+	{
+		GUI_SetTimer(frame_win, NET_PROGCESS_TIMERID,NET_PROGCESS_TIMEROUT,NULL);
+	}
+	
+	return EPDK_OK;
+}
+
+static __s32 net_movie_menu_key_paint(__gui_msg_t *msg)
+{
+	if (KEY_UP_ACTION == msg->dwAddData2)
+	{
+		net_movie_prog_attr_t* net_movie_prog_attr=NULL;
+		net_movie_prog_attr = (net_movie_prog_attr_t *)GUI_WinGetAttr(msg->h_deswin);
+		if(net_movie_prog_attr == NULL)
+        {
+            return EPDK_FAIL;
+        }
+		if(1 == net_movie_prog_attr->protect_flag)
+		{
+			return EPDK_OK;
+		}
+		if(GUI_MSG_KEY_ENTER==msg->dwAddData1)
+		{
+		   	net_movie_prog_attr_t* net_movie_prog_attr=NULL;
+			 __cedar_status_t fsm_sta;
+			net_movie_prog_attr = (net_movie_prog_attr_t *)GUI_WinGetAttr(msg->h_deswin);
+			fsm_sta = robin_get_fsm_status();
+			if(CEDAR_STAT_PLAY == fsm_sta)
+			{
+				if (GUI_LYRWIN_STA_ON != GUI_LyrWinGetSta(net_movie_prog_attr->movie_prog_layer))
+				{
+					return EPDK_FAIL;
+				}
+				robin_set_cmd_pause();
+				GUI_LyrWinSel(net_movie_prog_attr->movie_prog_layer);
+				GUI_BMP_Draw(net_movie_prog_attr->net_movie_pause_buf, net_proc_ui_para.Play_icon.x, net_proc_ui_para.Play_icon.y);
+			}
+			else if(CEDAR_STAT_PAUSE == fsm_sta)
+			{
+				if (GUI_LYRWIN_STA_ON != GUI_LyrWinGetSta(net_movie_prog_attr->movie_prog_layer))
+				{
+					return EPDK_FAIL;
+				}
+				robin_set_cmd_play();
+				GUI_LyrWinSel(net_movie_prog_attr->movie_prog_layer);
+				GUI_BMP_Draw(net_movie_prog_attr->net_movie_play_buf, net_proc_ui_para.Play_icon.x, net_proc_ui_para.Play_icon.y);
+			}
+			else if(CEDAR_STAT_STOP== fsm_sta)
+			{
+				
+			}
+			else
+			{}
+		}
+		else if(GUI_MSG_KEY_LONGLEFT==msg->dwAddData1)
+		{
+			
+		}
+		else if(GUI_MSG_KEY_LONGRIGHT==msg->dwAddData1)
+		{
+			
+		}
+		else if(GUI_MSG_KEY_VADD==msg->dwAddData1)
+		{
+			dsk_volume_inc();
+		}
+		else if(GUI_MSG_KEY_VDEC==msg->dwAddData1)
+		{
+			dsk_volume_dec();
+		}				
+		else if(GUI_MSG_KEY_ESCAPE == msg->dwAddData1)
+		{
+			net_movie_cmd2parent(NET_EXP_MOVIE_MENU_DESTROY,0,0);
+		}
+ 	}
+	return EPDK_OK;
+}
+static __s32 net_movie_prog_update_new(net_movie_prog_attr_t*  net_movie_prog_attr, __s32 val)										 
+{
+    GUI_MEMDEV_Handle draw_mem;
+	__s32 i;
+	__s32 n;
+	net_movie_prog_time_t format_time0,format_time1;
+	char str_cur_time[32]={0};
+	char str_total_time[32]={0};
+	if (!net_movie_prog_attr)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	if(net_process_flag == 0)
+	{
+		return EPDK_FAIL;
+	}
+	if (GUI_LYRWIN_STA_ON != GUI_LyrWinGetSta(net_movie_prog_attr->movie_prog_layer))
+	{
+		__msg("GUI_LYRWIN_STA_ON != GUI_LyrWinGetSta(scene_para->hlyr), do not paint...\n");
+		return EPDK_FAIL;
+	}
+	net_movie_prog_attr->total_time = robin_get_total_time();
+	if(net_movie_prog_attr->show_jump_time > net_movie_prog_attr->total_time)
+	{
+	   net_movie_prog_attr->show_jump_time = net_movie_prog_attr->total_time; 
+	}
+	if (net_movie_prog_attr->show_jump_time <= 0 || net_movie_prog_attr->total_time <= 0)
+	{
+		n = 0;
+	}
+	else
+	{
+		n = ((net_proc_ui_para.Proc_bg.width - net_proc_ui_para.Cursor_pos.width) * net_movie_prog_attr->show_jump_time)
+			/(PROG_MID_WIDTH * net_movie_prog_attr->total_time);
+	}
+	
+	net_movie_time2time(net_movie_prog_attr->show_jump_time, &format_time0);
+	net_movie_time2time(net_movie_prog_attr->total_time, &format_time1);
+	GUI_LyrWinSel(net_movie_prog_attr->movie_prog_layer);
+    //背景
+
+    GUI_UC_SetEncodeUTF8();
+	GUI_SetColor(GUI_WHITE);
+    GUI_SetFont(SWFFont);
+    GUI_SetDrawMode(GUI_DRAWMODE_NORMAL);
+	draw_mem = GUI_MEMDEV_Create(0, 0, net_proc_ui_para.Lyr_pos.width, net_proc_ui_para.Lyr_pos.height);
+	GUI_MEMDEV_Select(draw_mem);
+	//当前时间
+	show_cur_time_with_digital_pic(net_movie_prog_attr,format_time0.data1.hour,format_time0.data1.minute,format_time0.data1.second);
+	show_total_time_with_digital_pic(net_movie_prog_attr,format_time1.data1.hour,format_time1.data1.minute,format_time1.data1.second);
+	if(!(n<0))
+	{
+		//画进度条
+		{
+			if (net_movie_prog_attr->prog_bg_buf)
+			{
+			  
+			   GUI_BMP_Draw(net_movie_prog_attr->prog_bg_buf, net_proc_ui_para.Proc_bg.x, net_proc_ui_para.Proc_bg.y);				
+			}
+		}
+		/*
+		for (i = 0 ; i < n ; i++)
+		{
+			if(i==0)
+			{
+				GUI_BMP_Draw(net_movie_prog_attr->prog_left_buf, 150, 32);
+				
+			}
+			else
+			{
+			   GUI_BMP_Draw(net_movie_prog_attr->prog_mid_buf, 150+i*PROG_MID_WIDTH, 32);
+			}
+		}
+		
+		if(i==0)
+		{
+			GUI_BMP_Draw(net_movie_prog_attr->prog_left_buf, 150, 32);
+			
+		}
+		else
+		{
+			if((n-1)*PROG_MID_WIDTH<PROG_REAL_BG_WIDTH-4)
+			{
+				GUI_BMP_Draw(net_movie_prog_attr->prog_cursor_buf, 150+(i)*PROG_MID_WIDTH, 12);
+			}
+		}*/
+		
+		
+	}
+	Funprintf("--2 net timer n = %d--\n",n);
+	//if(n>1)
+		GUI_BMP_Draw(net_movie_prog_attr->prog_cursor_buf,net_proc_ui_para.Cursor_pos.x +(n-1)*PROG_MID_WIDTH,net_proc_ui_para.Cursor_pos.y);
+
+    GUI_MEMDEV_CopyToLCD_Ex(draw_mem);
+	GUI_MEMDEV_Select(NULL);
+	GUI_MEMDEV_Delete(draw_mem);
+    draw_mem=NULL;
+
+	return EPDK_OK;
+}
+
+
+static void movie_prog_thread(void *p_arg)
+{
+	__s32 ret = EPDK_FAIL;
+	__s32  flag = 0;
+	net_movie_prog_attr_t*  net_movie_prog_attr;
+	net_movie_attr_t*	net_movie_attr = (net_movie_attr_t *)p_arg ;
+	net_movie_prog_attr = (net_movie_prog_attr_t *)GUI_WinGetAttr(GUI_WinGetHandFromName("net movie menu win"));
+ 	while(1)
+ 	{
+ 		if(esKRNL_TDelReq(EXEC_prioself) == OS_TASK_DEL_REQ)
+		{
+			esKRNL_TDel(EXEC_prioself);
+			break;
+		}
+		if(flag == 0)
+		{
+			if(net_movie_prog_attr->show_jump_time > 0 && (net_movie_prog_attr->show_jump_time < net_movie_prog_attr->total_time))
+			{
+				ret = robin_set_cmd_jump(net_movie_prog_attr->show_jump_time);
+				if(EPDK_FAIL== ret)
+				{		
+					net_movie_cmd3parent(NET_PLAY_JUMP_FAIL,0,0);
+					prog_jump_flag = 0;
+				}
+				else
+				{
+					//Dialog tip
+					net_movie_cmd3parent(NET_PLAY_JUMP_OK,0,0);
+					prog_jump_flag = 0;
+					//进度条更新定时器重新打开
+				}
+			}
+			flag = 1;
+		}
+		else
+		{
+			esKRNL_TimeDly(5);
+		}
+	}
+}
+
+static __s32 net_movie_prog_touch_proc(__gui_msg_t *msg)
+{
+	__s32 x = 0, y = 0;
+	__s32 speed = 0; 
+	__s32 val;
+	static __bool touch_down_is_valid = 0;
+	net_movie_prog_attr_t*	net_movie_prog_attr;	
+	net_movie_attr_t*	net_movie_attr;
+	net_movie_prog_attr = (net_movie_prog_attr_t *)GUI_WinGetAttr(msg->h_deswin);
+	net_movie_attr = (net_movie_attr_t *)GUI_WinGetAttr(GUI_WinGetHandFromName("net movie frame win"));
+	if(net_movie_prog_attr == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	x = LOSWORD(msg->dwAddData2);
+	y = HISWORD(msg->dwAddData2);  
+	speed = LOSWORD(msg->dwReserved);
+	if(GUI_IsTimerInstalled(msg->h_deswin,NET_PROGCESS_TIMERID))
+	{
+		GUI_ResetTimer(msg->h_deswin, NET_PROGCESS_TIMERID,500,NULL);
+	}	
+	switch(msg->dwAddData1)
+	{	
+		case GUI_MSG_TOUCH_DOWN:
+		case GUI_MSG_TOUCH_LONGDOWN:
+		{	   
+			if (GUI_WinGetCaptureWin() != msg->h_deswin)			
+			{
+				GUI_WinSetCaptureWin(msg->h_deswin);
+			}
+			if(x > net_proc_ui_para.Proc_bg.x && x <= (net_proc_ui_para.Proc_bg.x + net_proc_ui_para.Proc_bg.width+50) && y >= 0 && y <= net_proc_ui_para.Spsc_bg.height)
+			{
+				val = (x - net_proc_ui_para.Proc_bg.x)*(net_movie_prog_attr->total_time)/net_proc_ui_para.Proc_bg.width;
+				if (GUI_IsTimerInstalled(msg->h_deswin, NET_MOVIE_TIME_PROGRESS_ID))
+				{
+					GUI_KillTimer(msg->h_deswin, NET_MOVIE_TIME_PROGRESS_ID );		
+				}
+			}
+			break;
+		}
+		case GUI_MSG_TOUCH_UP:
+		{
+			if(GUI_WinGetCaptureWin() == msg->h_deswin)
+			{
+				GUI_WinReleaseCapture();
+			}
+			if(x > (net_proc_ui_para.Play_icon.x-10) && x < (net_proc_ui_para.Play_icon.x + net_proc_ui_para.Play_icon.width) && \
+				y > net_proc_ui_para.Play_icon.y && y < (net_proc_ui_para.Play_icon.y+net_proc_ui_para.Play_icon.height))
+			{
+				__cedar_status_t sta;
+				sta = robin_get_fsm_status();
+				if(CEDAR_STAT_PLAY == sta)
+				{
+					if (GUI_LYRWIN_STA_ON != GUI_LyrWinGetSta(net_movie_prog_attr->movie_prog_layer))
+					{
+						return EPDK_FAIL;
+					}
+					robin_set_cmd_pause();
+					GUI_LyrWinSel(net_movie_prog_attr->movie_prog_layer);
+					GUI_BMP_Draw(net_movie_prog_attr->net_movie_pause_buf, net_proc_ui_para.Play_icon.x, net_proc_ui_para.Proc_bg.y);
+				}
+				else if(CEDAR_STAT_PAUSE== sta || CEDAR_STAT_STOP== sta)
+				{
+					if (GUI_LYRWIN_STA_ON != GUI_LyrWinGetSta(net_movie_prog_attr->movie_prog_layer))
+					{
+						return EPDK_FAIL;
+					}
+					robin_set_cmd_play();
+					GUI_LyrWinSel(net_movie_prog_attr->movie_prog_layer);
+					GUI_BMP_Draw(net_movie_prog_attr->net_movie_play_buf, 10,10);
+				}
+
+			}
+			else if(x > net_proc_ui_para.Proc_bg.x && x <= (net_proc_ui_para.Proc_bg.x + net_proc_ui_para.Proc_bg.width+50) && y >= 0 && y <= net_proc_ui_para.Spsc_bg.height)
+			{
+				val = (x - net_proc_ui_para.Proc_bg.x)*(net_movie_prog_attr->total_time)/net_proc_ui_para.Proc_bg.width;
+				net_movie_prog_attr->show_jump_time = val;
+				if(net_movie_prog_attr->show_jump_time > 0 && (net_movie_prog_attr->show_jump_time < net_movie_prog_attr->total_time))
+				{
+					if(1 == prog_jump_flag)
+					{
+						Funprintf("--jump fail--\n");
+						return EPDK_OK;
+					}
+					net_movie_prog_update_new(net_movie_prog_attr,val);
+					net_movie_tips_show(net_movie_attr, STRING_NETWORK_LOADING);	
+
+					if(movie_prog_tid)
+					{
+						while(1)
+						{
+							if(esKRNL_TDelReq(movie_prog_tid) == OS_TASK_NOT_EXIST)
+							{
+								break;
+							}
+							esKRNL_TimeDly(1);
+						}
+						movie_prog_tid = NULL;
+					}
+					
+					if(movie_prog_tid == NULL)
+					{
+						prog_jump_flag = 1;
+						movie_prog_tid= esKRNL_TCreate(movie_prog_thread, (void *)net_movie_attr, 0x600, KRNL_priolevel4);	
+					}	
+					eDbug(" 4 \n");
+				}
+			}
+			else 
+			{
+				Funprintf("--touch net_process_flag = %d--\n",net_process_flag);
+				if(net_process_flag)
+				{
+					gscene_hbar_set_state(HBAR_ST_HIDE);
+					net_movie_tips_delete(net_movie_attr, 0);
+					GUI_LyrMove(net_movie_prog_attr->movie_prog_layer,0,250);
+					net_process_flag = 0;
+					if(GUI_WinGetHandFromName("net movie frame win"))
+						GUI_WinSetFocusChild(GUI_WinGetHandFromName("net movie frame win"));
+				}
+				else 
+				{
+					gscene_hbar_set_state(HBAR_ST_SHOW);	
+					GUI_LyrMove(net_movie_prog_attr->movie_prog_layer,0,-250);
+					net_process_flag = 1;
+				}	
+				if(prog_jump_flag)			/*跳播过程中禁止退出*/
+				{
+					return EPDK_OK;
+				}
+			}
+
+			{
+				if (!GUI_IsTimerInstalled(msg->h_deswin, NET_MOVIE_TIME_PROGRESS_ID))
+				{
+					eDbug(" 5 \n");
+					GUI_SetTimer(msg->h_deswin, NET_MOVIE_TIME_PROGRESS_ID, NET_MOVIE_TIME_PROGRESS_TIME, NULL);		
+				}	
+
+			}
+			break;
+		}
+		case GUI_MSG_TOUCH_MOVE:
+		{
+			if((last_point_x - x) > 10 || (last_point_x - x) < -10)
+			{
+				if(x > net_proc_ui_para.Proc_bg.x&& x <= (net_proc_ui_para.Proc_bg.x + net_proc_ui_para.Proc_bg.width) && y >= net_proc_ui_para.Proc_bg.y && y <= net_proc_ui_para.Spsc_bg.height)
+				{
+					if(EPDK_OK == prog_jump_flag)
+					{
+						val = (x - net_proc_ui_para.Proc_bg.x)*(net_movie_prog_attr->total_time)/net_proc_ui_para.Proc_bg.width;
+						net_movie_prog_attr->show_jump_time = val;
+						net_movie_prog_update_new(net_movie_prog_attr,val);
+						last_point_x = x;
+					}
+				}	
+			}	
+			break;
+		}
+		default:
+		{
+			break;
+		}
+	}	
+	return EPDK_OK;
+}
+
+
+static __s32 net_movie_prog_proc(__gui_msg_t *msg)
+{
+	switch(msg->id)
+	{
+		case GUI_MSG_CREATE:
+		{
+			__s32 ret;
+			__cedar_status_t sta;
+			net_movie_prog_attr_t*  net_movie_prog_attr;
+			net_movie_prog_attr = (net_movie_prog_attr_t *)GUI_WinGetAttr(msg->h_deswin);
+			if(net_movie_prog_attr == NULL)
+            {
+                return EPDK_FAIL;
+            }
+			prog_jump_flag = 0;
+	        net_movie_prog_init_bmp(net_movie_prog_attr);
+			GUI_LyrWinSetSta(net_movie_prog_attr->movie_prog_layer,GUI_LYRWIN_STA_ON);
+			GUI_LyrWinSel(net_movie_prog_attr->movie_prog_layer);
+			GUI_LyrWinSetTop(net_movie_prog_attr->movie_prog_layer);
+			sta = robin_get_fsm_status();
+			GUI_BMP_Draw(net_movie_prog_attr->under_bg_buf, net_proc_ui_para.Spsc_bg.x, net_proc_ui_para.Spsc_bg.y);	  
+	        //GUI_BMP_Draw(net_movie_prog_attr->net_movie_escape_buf, 750, 0);  
+			if(CEDAR_STAT_PLAY == sta)
+			{
+				GUI_BMP_Draw(net_movie_prog_attr->net_movie_play_buf, net_proc_ui_para.Play_icon.x, net_proc_ui_para.Play_icon.y);
+			}
+			else if(CEDAR_STAT_PAUSE== sta || CEDAR_STAT_STOP== sta)
+			{
+				GUI_BMP_Draw(net_movie_prog_attr->net_movie_pause_buf, net_proc_ui_para.Play_icon.x, net_proc_ui_para.Play_icon.y);
+			}
+			else
+			{
+			}		  
+			net_movie_prog_update(net_movie_prog_attr);
+			net_movie_prog_install_timmer(net_movie_prog_attr,msg->h_deswin);		
+			
+			return EPDK_OK;
+		}
+		case GUI_MSG_PAINT:
+		{
+			return EPDK_OK;
+		}	
+		case GUI_MSG_CLOSE:
+		{
+			GUI_FrmWinDelete(msg->h_deswin);
+			return EPDK_OK;
+		}
+		case GUI_MSG_DESTROY:
+		{
+			net_movie_prog_attr_t* net_movie_prog_attr=NULL;
+			net_movie_attr_t*	net_movie_attr=NULL;
+			net_movie_prog_attr = (net_movie_prog_attr_t *)GUI_WinGetAttr(msg->h_deswin);
+			net_movie_attr = (net_movie_attr_t *)GUI_WinGetAttr(GUI_WinGetHandFromName("net movie frame win"));
+			if(net_movie_prog_attr == NULL)
+	        {
+                 return EPDK_FAIL;
+            }
+			net_movie_prog_attr->protect_flag = 1;
+			if (GUI_IsTimerInstalled(msg->h_deswin, NET_MOVIE_TIME_PROGRESS_ID))
+			{
+				GUI_KillTimer(msg->h_deswin, NET_MOVIE_TIME_PROGRESS_ID);		
+			}
+			if (GUI_IsTimerInstalled(msg->h_deswin, NET_PROGCESS_TIMERID))
+			{
+				GUI_KillTimer(msg->h_deswin, NET_PROGCESS_TIMERID);		
+			}
+			net_movie_tips_delete(net_movie_attr, 0);
+		    net_movie_prog_uninit_bmp(net_movie_prog_attr);
+			if(net_movie_prog_attr)
+			{
+				esMEMS_Mfree(0,net_movie_prog_attr);
+				net_movie_prog_attr=NULL;
+			}
+			return EPDK_OK;
+		}
+		case GUI_MSG_KEY:
+		{
+	    	net_movie_menu_key_paint(msg);
+			return EPDK_OK;
+	    }
+		case GUI_MSG_COMMAND:
+        {
+			return EPDK_OK;
+	    }
+		case GUI_MSG_TOUCH:
+	    {
+			net_movie_prog_touch_proc(msg);
+	        return EPDK_OK;
+	    }
+		case GUI_MSG_TIMER:
+	    {
+	        net_movie_prog_attr_t* net_movie_prog_attr;		
+			net_movie_attr_t*	net_movie_attr=NULL;
+			net_movie_prog_attr = (net_movie_prog_attr_t *)GUI_WinGetAttr(msg->h_deswin);
+			net_movie_attr = (net_movie_attr_t *)GUI_WinGetAttr(GUI_WinGetHandFromName("net movie frame win"));
+			if(net_movie_prog_attr == NULL)
+          	{
+                 return EPDK_FAIL;
+            }
+	        if(LOWORD(msg->dwAddData1) == NET_MOVIE_TIME_PROGRESS_ID)
+	        {
+	        	Funprintf("--prog_jump_flag = %d--\n",prog_jump_flag);
+	        	if(EPDK_OK == prog_jump_flag)
+	        	{
+	        		net_movie_prog_update(net_movie_prog_attr);
+	        	}
+	        }
+			else if(LOWORD(msg->dwAddData1) ==NET_PROGCESS_TIMERID)
+			{
+				Funprintf("--prog timer start --\n");
+				if(net_process_flag)
+				{
+					Funprintf("--2 prog timer start --\n");
+					gscene_hbar_set_state(HBAR_ST_HIDE);			
+					GUI_LyrMove(net_movie_prog_attr->movie_prog_layer,0,250);
+					net_movie_tips_delete(net_movie_attr, 0);
+					net_process_flag = 0;
+					if(GUI_WinGetHandFromName("net movie frame win"))
+						GUI_WinSetFocusChild(GUI_WinGetHandFromName("net movie frame win"));
+				}
+			}
+	        return EPDK_OK;
+	    }	
+		case DSK_MSG_WIFI_PART_UNLINKING:
+		{
+			return EPDK_OK;
+		}
+		default:
+			break;
+	}
+	return EPDK_OK;	
+}
+
+
+H_WIN net_movie_prog_win_create(H_WIN h_parent)
+{
+	__gui_framewincreate_para_t framewin_para;
+	net_movie_prog_attr_t*  net_movie_prog_attr=NULL;
+	H_WIN win = NULL;
+	FB fb;
+	RECT rect;
+
+	__wrn("enter sel win\n");
+	net_movie_prog_attr = (net_movie_prog_attr_t *)esMEMS_Malloc(0,sizeof(net_movie_prog_attr_t));
+	if(!net_movie_prog_attr)
+	{
+
+		__msg("memory balloc fail.........\n");
+		return EPDK_FAIL;
+	}
+    
+	eLIBs_memset((void*)net_movie_prog_attr, 0, sizeof(net_movie_prog_attr_t));
+
+	rect.x = net_proc_ui_para.Lyr_pos.x;
+	rect.y = net_proc_ui_para.Lyr_pos.y;
+	rect.width = net_proc_ui_para.Lyr_pos.width;
+	rect.height = net_proc_ui_para.Lyr_pos.height;
+	net_movie_prog_attr->movie_prog_layer = net_movie_layer_32bpp_create(rect,1);
+
+    GUI_LyrWinGetFB(net_movie_prog_attr->movie_prog_layer,&fb);
+	eLIBs_memset(&framewin_para, 0, sizeof(__gui_framewincreate_para_t));
+	framewin_para.name =	"net movie menu win";
+	framewin_para.dwExStyle = WS_EX_NONE;
+	framewin_para.dwStyle = WS_NONE|WS_VISIBLE;
+	framewin_para.spCaption =  NULL;
+	framewin_para.hOwner	= NULL;
+	framewin_para.id         = NET_MOVIE_PROG_ID;
+	framewin_para.hHosting = h_parent;
+	framewin_para.FrameWinProc = (__pGUI_WIN_CB)esKRNL_GetCallBack((__pCBK_t)net_movie_prog_proc);
+	framewin_para.rect.x =0;
+	framewin_para.rect.y = 0;
+	framewin_para.rect.width= fb.size.width;
+	framewin_para.rect.height = fb.size.height;
+	framewin_para.BkColor.alpha =  0;
+	framewin_para.BkColor.red = 0;
+	framewin_para.BkColor.green = 0;
+	framewin_para.BkColor.blue = 0;
+	framewin_para.attr =  (void *)net_movie_prog_attr;
+	framewin_para.hLayer = net_movie_prog_attr->movie_prog_layer;
+	win = GUI_FrmWinCreate(&framewin_para);
+	if( win == NULL )
+	{
+		eDbug("cook_frw create fail cook_attr free\n");
+		GUI_LyrWinDelete(net_movie_prog_attr->movie_prog_layer);
+		esMEMS_Bfree(net_movie_prog_attr, sizeof(net_movie_prog_attr_t));
+		net_movie_prog_attr = NULL;
+        return NULL;
+	}
+	return win;
+}
+
+void net_movie_prog_win_delete(H_WIN net_movie_prog_win)
+{
+	net_movie_prog_attr_t*  net_movie_prog_attr;
+	net_movie_prog_attr = (net_movie_prog_attr_t *)GUI_WinGetAttr(net_movie_prog_win);
+	if(net_movie_prog_attr->movie_prog_layer)
+	{	
+		GUI_LyrWinDelete(net_movie_prog_attr->movie_prog_layer);
+		net_movie_prog_attr->movie_prog_layer = NULL;
+	}
+}
+
+

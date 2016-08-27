@@ -1,0 +1,393 @@
+
+
+#include "beetles_app.h"
+#include "music_ui.h"
+
+
+
+static music_ui_t  music_uiparam_horiz =
+{
+	//layer window
+	{
+		PIXEL_COLOR_ARGB8888,       //fmt
+		{ 800, 480 },              	//fb size
+		{ 0, 0, 800, 480 },       	//src rect
+		{ 0, 0, 800, 480 },      	//scn rect
+		{ 0 },                     	//reserved
+	},
+
+	//list window, ����ļ�
+	{
+
+		{20, 70, 364, 384},						//listbar area�����б������
+		{0,   0, 364, 48 },						//item rectangle �������ֵ�����
+		{4,   1, 357, 45},						//focus icon(select border)ѡ������ͼƬ����
+		{5, 3, 45, 45},							//file icon�ļ�����ͼ��
+		{60,0,284, 45},							//text rectangle��������
+		{1,46,363,1},
+
+	},
+	//scroll bar ui
+	{
+		{340, 7,  7, 440},						//scroll bar background�����б����������λ��
+		{342, 22, 5, 410},						//scroll�����б������λ��
+		8,										//head�����б�ͷ��������
+		1,										//body�����б��ɫλ��
+		8,										//tail�����б�ײ�������
+	},
+	//head bar ui
+	{
+		{450, 40, 270, 110}, 					//headbar background������ͷ������
+		{680, 3,  128, 24},						//����
+		{439, 379, 65, 65},						//����ģʽ״̬ͼ��
+		{694, 379, 65, 65},						//EQģʽ״̬ͼ��
+		{471, 5, 26, 16},						//����ر�ʱ��ͼ��
+		{630, 5, 26, 16},						//����ͼ��
+		{661, 3, 18, 16},						//����text
+		{640, 6, 31, 12},						//���ͼ��
+		{0, 0, 0, 16},							//ʱ����ʾ����
+	},
+	//palyer ui
+	{
+		{424, 359, 300, 50}, 					//���ư�ť��������()��Ƶ�׹���
+		{469, 65,  235, 50}, 					//������ʾ�ַ�����
+		{439, 379, 65, 65},						//����ģʽ״̬ͼ��
+		{694, 379, 65, 65},						//EQģʽ״̬ͼ��
+		{694, 379, 65, 65},						//����ʱ����ư�ť					
+
+		{424, 415, 42, 42},						//��һ�װ�ť
+		{702, 415, 42, 42},						//��һ�װ�ť
+		{534, 150, 26, 16},						//������ͣ��ť
+		{567, 150, 26, 16},						//���˰�ť
+		{600, 150, 26, 16},						//�����ť
+		{544, 365, 80, 80},						//����״̬ͼ��(��ͣ�򲥷�)
+
+		{459,319, 85, 20},	        			 //��ǰ����ʱ��
+		{684,319, 85, 20},						//��ʱ����ʾ����
+
+		{459, 286, 7, 15},										//������head
+		{459, 283, 293,20},										//������body
+		{466, 283, 7, 15},										//������point,��head֮����˼�7
+		{745, 286, 7, 15},										//������tail
+		{745, 286, 7, 15},										//������point_tail
+
+		{453, 253, 26, 16},						//�ݳ���ͼ��
+		{479, 253, 70, 16},						//�ݳ�������
+		{550, 253, 26, 16},						//�ļ���Сͼ��
+		{576, 253, 70, 16},						//�ļ���С��ʾ
+
+		{453, 283, 26, 16},						//ר������ͼ��
+		{479, 283, 70, 16},						//ר������
+		{550, 283, 26, 16},						//bitrateͼ��
+		{576, 283, 70, 16},						//bitrate��С��ʾ
+	},
+	//volume bar ui
+	{
+		{0, 0, 0, 0},									//��������������ʾ����
+		{0, 0, 0, 0},									//���speakerͼ����ʾ��������״̬
+		{0, 0, 0, 0},									//�м�������ʾ������
+		{0, 0, 0, 0},    								//�ұ�speakerͼ����ʾ
+	},
+	//spectrum    Ƶ��
+	{
+		{0, 0, 0, 0}
+	},
+	//icon table
+	{
+		//���������
+		{ ID_MUSIC_PALETTE_BMP,           			NULL, NULL },    
+		{ NULL,           	NULL,  				 	NULL },    
+		{ ID_MUSIC_FILE_UNFOCUSED_BMP,      		NULL, NULL }, 	
+		{ ID_MUSIC_FILE_UNFOCUSED_BMP,      		NULL, NULL }, 	//�ļ�ͼ�꣬δ��ѡ��ʱ
+		{ ID_MUSIC_FILE_FOCUSED_BMP,      			NULL, NULL }, 	//�ļ�ͼ�꣬��ѡ��ʱ
+		{ ID_MUSIC_LIST_ITEM_FOCUS_BMP,    			NULL, NULL }, 	//ѡ���
+		{ ID_MUSIC_LONG_STR_SCROLL_BMP,				NULL,  			 	 NULL },     //���ļ�������������
+		//play mode
+		{ ID_MUSIC_PLAY_ALL_BMP,    				NULL,  				 NULL }, 	//����ȫ��,���ظ�
+		{ NULL,    				NULL,  				 NULL }, 	//����һ��
+		{ ID_MUSIC_PLAY_RANDOM_BMP,    				NULL,  				 NULL }, 	//�������
+		{ ID_MUSIC_REPEAT_ALL_BMP,    				NULL,  				 NULL }, 	//�ظ�����
+		{ ID_MUSIC_REPEAT_ONE_BMP,    				NULL,  				 NULL }, 	//�ظ�һ��
+		{ ID_MUSIC_EQ_NORMAL_BMP,    				NULL,  				 NULL }, 	
+		{ NULL,    				NULL,  				 NULL }, 	
+		{ ID_MUSIC_EQ_ROCK_BMP,    					NULL,  				 NULL }, 	
+		{ NULL,    					NULL,  				 NULL }, 	
+		{ ID_MUSIC_EQ_POP_BMP,    					NULL,  				 NULL }, 	
+		//EQ mode
+		{ NULL,    	NULL,  				 NULL },
+		{ ID_MUSIC_EQ_NORMAL_BTN_FOCUSED_BMP,    	NULL,  				 NULL },
+		{ NULL,    	NULL,  				 NULL },
+		{ NULL,    NULL,  				 NULL },
+		{ NULL,    	NULL,  				 NULL },
+		{ NULL,    	NULL,  				 NULL },
+		{ NULL,    	NULL,  				 NULL },
+		{ ID_MUSIC_EQ_ROCK_BTN_FOCUSED_BMP,    		NULL,  				 NULL },
+		{ NULL,    		NULL,  				 NULL },
+		{ NULL,    	NULL,  				 NULL },
+		{ NULL,    		NULL,  				 NULL },
+		{ NULL,    		NULL,  				 NULL },
+		{ NULL,    	NULL,  				 NULL },
+		{ ID_MUSIC_EQ_POP_BTN_FOCUSED_BMP,    		NULL,  				 NULL },
+		{ NULL,    		NULL,  				 NULL },
+		//BL Time
+		{ NULL,    					NULL,  				 NULL }, 	
+		{ NULL,    					NULL,  				 NULL }, 	
+		{ NULL,    					NULL,  				 NULL }, 	
+		{ NULL,    					NULL,  				 NULL }, 	
+		{ NULL,    					NULL,  				 NULL }, 	
+		//volume
+		{ NULL,    			NULL,  				 NULL }, 	
+		//bettery
+		{ NULL,    				NULL,  				 NULL }, 	
+		{ NULL,    				NULL,  				 NULL }, 	
+		{ NULL,    				NULL,  				 NULL }, 	
+		{ NULL,    				NULL,  				 NULL }, 	
+		{ NULL,    				NULL,  				 NULL }, 
+		{ NULL,    				NULL,  				 NULL }, 
+		{ NULL,    			NULL,  				 NULL }, 
+		{ NULL,    			NULL,  				 NULL }, 
+		{ NULL,    			NULL,  				 NULL }, 
+		{ NULL,    			NULL,  				 NULL }, 	
+		{ NULL,    			NULL,  				 NULL }, 	
+		{ NULL,    			NULL,  				 NULL }, 	
+		//play mode button
+		{ ID_MUSIC_PLAY_ALL_BMP,    				NULL,  				NULL }, 		//����ȫ��, unfocused
+		{ ID_MUSIC_PLAY_ALL_BTN_FOCUSED_BMP,		NULL,  				NULL }, 		//����ȫ��, focused
+		{ NULL,		NULL,  				NULL }, 		//����ȫ��, pressed
+
+		{ NULL,    				NULL,  				NULL }, 		//����һ��, unfocused
+		{ NULL,		NULL,  				NULL }, 		//����һ��, focused
+		{ NULL,		NULL,  				NULL }, 		//����һ��, pressed
+
+		{ ID_MUSIC_PLAY_RANDOM_BMP,    				NULL,  				NULL }, 		//�������, unfocused
+		{ ID_MUSIC_PLAY_RANDOM_BTN_FOCUSED_BMP,		NULL,  				NULL }, 		//�������, focused
+		{ NULL,		NULL,  				NULL }, 		//�������, pressed
+
+		{ ID_MUSIC_REPEAT_ALL_BMP,    				NULL,  				NULL }, 		//�ظ�����ȫ��, unfocused
+		{ ID_MUSIC_REPEAT_ALL_BTN_FOCUSED_BMP,		NULL,  				NULL }, 		//�ظ�����ȫ��, focused
+		{ NULL,		NULL,  				NULL }, 		//�ظ�����ȫ��, pressed
+
+		{ ID_MUSIC_REPEAT_ONE_BMP,    				NULL,  				NULL }, 		//�ظ�����һ��, unfocused
+		{ ID_MUSIC_REPEAT_ONE_BTN_FOCUSED_BMP,		NULL,  				NULL }, 		//�ظ�����һ��, focused
+		{ NULL,		NULL,  				NULL }, 		//�ظ�����һ��, pressed
+
+		//EQ mode button
+		{ NULL,		NULL,  				NULL }, 		//EQ mode button, unfocused
+		{ NULL,			NULL,  				NULL }, 		//focused
+		{ NULL,			NULL,  				NULL }, 		//pressed
+
+		//BL time button
+		{ NULL,		NULL,  				NULL }, 		//EQ mode button, unfocused
+		{ NULL,			NULL,  				NULL }, 		//focused
+		{ NULL,			NULL,  				NULL }, 		//pressed
+
+		//play previous button
+		{ NULL,						NULL,  				NULL }, 	//������һ��, unfocused
+		{ NULL,					NULL,  				NULL }, 	//focused
+		{ NULL,					NULL,  				NULL }, 		//pressed
+		//play next button
+		{ NULL,					NULL,  				NULL }, 	//������һ��, unfocused
+		{ NULL,				NULL,  				NULL }, 	//focused
+		{ NULL,				NULL,  				NULL }, 	//pressed
+		//play pause button
+		{ NULL,	NULL,  				NULL }, 	//������ͣ, unfocused
+		{ NULL,		NULL,  				NULL }, 	//focused
+		{ NULL,		NULL,  				NULL }, 	//pressed
+
+		//play backward button
+		{ NULL,	NULL,  				NULL }, 	//����, unfocused
+		{ NULL,	NULL,  				NULL }, 	//focused
+		{ NULL,	NULL,  				NULL }, 	//pressed
+
+		//play forward button
+		{ NULL,	NULL,  				NULL }, 	//���, unfocused
+		{ NULL,	NULL,  				NULL }, 	//focused
+		{ NULL,	NULL,  				NULL }, 	//pressed
+
+		//play status button,
+		{ ID_MUSIC_BIG_PLAY_BMP,					NULL,				NULL }, 								
+		{ ID_MUSIC_BIG_PAUSE_BMP,					NULL,  				NULL }, 								
+		{ NULL,				NULL,  		 		NULL }, 								
+		{ NULL,					NULL,  				NULL }, 								
+
+		//process bar
+		{ ID_MUSIC_PROCESS_BAR_HEAD_BMP,			NULL,  			 	NULL }, 								
+		{ ID_MUSIC_PROCESS_BAR_BODY_BMP,			NULL,  				NULL }, 								
+		{ ID_MUSIC_PROCESS_BAR_TAIL_BMP,			NULL,  		 		NULL }, 								
+		{ ID_MUSIC_PROCESS_BAR_POINT_BMP,			NULL,  				NULL },
+		{ ID_MUSIC_PROCESS_BAR_POINT_TAIL_BMP,		NULL,  				NULL },
+		//���ȵ�
+
+		//������Ϣͼ��
+		{ NULL,				NULL,  			 	NULL }, 					
+		{ NULL,					NULL,  				NULL }, 								
+		{ NULL,					NULL,  		 		NULL }, 								
+		{ NULL,					NULL,  				NULL }, 								
+		//Ƶ��ͼͼ��
+		{ ID_MUSIC_PARTICLE_BMP,					NULL,  			 	NULL },
+		{ NULL,						NULL,  			 	NULL },
+
+		//�������������
+		{ NULL,				NULL,  			 	NULL },
+		{ NULL,			NULL,  			 	NULL },
+		{ NULL,			NULL,  			 	NULL },
+		{ NULL,			NULL,  			 	NULL },
+		{ NULL,						NULL,  			 	NULL },
+		{ NULL,						NULL,  			 	NULL },
+		{ NULL,						NULL,  			 	NULL },
+		{ NULL,						NULL,  			 	NULL },
+		{ NULL,						NULL,  			 	NULL },
+		{ NULL,						NULL,  			 	NULL },
+		{ NULL,						NULL,  			 	NULL },
+		{ NULL,						NULL,  			 	NULL },
+		{ NULL,						NULL,  			 	NULL },
+		{ NULL,						NULL,  			 	NULL },
+		{ID_MUSIC_LIST_LINE_BMP,           		 	NULL,   			NULL },
+		{ NULL,                                		NULL,  				NULL }
+	},
+};
+
+//�������explorer AP��Ƶ�UI����
+music_ui_t *music_get_ui_param(void)
+{
+	return &(music_uiparam_horiz);
+}
+
+//������������UI����
+music_list_ui_t *music_get_list_ui_param(void)
+{
+	return &(music_uiparam_horiz.list_ctrl);
+}
+
+//��ö���HeadbarUI����
+music_headbar_ui_t *music_get_headbar_ui_param(void)
+{
+	return 	&(music_uiparam_horiz.headbar);
+}
+
+//��ö���playerUI����
+music_palyer_ui_t *music_get_player_ui_param(void)
+{
+	return 	&(music_uiparam_horiz.player);
+}
+
+//���volume barUI����
+music_volume_bar_ui_t *music_get_volume_bar_ui_param(void)
+{
+	return 	&(music_uiparam_horiz.volume_bar);
+}
+/*
+************************************************************************************************************************
+*Function	:         void* explorer_get_listview_icon_res(__u32 index)
+*
+*Description	:
+*
+*Arguments  	:
+*
+*Return     	:
+*
+************************************************************************************************************************
+*/
+void *music_get_icon_res(__u32 index)
+{
+	music_icon_data_t *icon_table = NULL;
+	icon_table = music_uiparam_horiz.icon_table;
+
+	if(index > MUSIC_ICON_MAX)
+	{
+		return NULL;
+	}
+
+	//__msg("----icon_id: %d, res_id: %d\n", index, icon_table[index].res_id);
+	if(icon_table == NULL)
+	{
+		return NULL;
+	}
+	else if(icon_table[index].res_id == 0)
+	{
+		return NULL;
+	}
+	else if(icon_table[index].res_handle == NULL)
+	{
+		icon_table[index].res_handle = theme_open(icon_table[index].res_id);
+		icon_table[index].res_buffer = theme_hdl2buf(icon_table[index].res_handle);
+		return icon_table[index].res_buffer;
+	}
+	else
+	{
+		return icon_table[index].res_buffer;
+	}
+}
+
+/*
+************************************************************************************************************************
+*Function	:         __s32 explorer_free_listview_icon_res(void)
+*
+*Description	:
+*
+*Arguments  	:
+*
+*Return     	:
+*
+************************************************************************************************************************
+*/
+__s32 music_free_icon_res(void)
+{
+	__s32 i = 0;
+	music_icon_data_t *icon_table = NULL;
+	icon_table = music_uiparam_horiz.icon_table;
+
+	if(icon_table == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	else
+	{
+		for(i = 0; i < MUSIC_ICON_MAX; i++)
+		{
+			if(icon_table[i].res_handle != NULL)
+			{
+				theme_close(icon_table[i].res_handle);
+				icon_table[i].res_handle = NULL;
+				icon_table[i].res_buffer = NULL;
+			}
+		}
+		return EPDK_OK;
+	}
+}
+
+//���Explorer ����layer size
+__s32 music_get_screen_rect(RECT *screen_rect)
+{
+	music_ui_t *ui_param;
+	ui_param = music_get_ui_param();
+	screen_rect->x = ui_param->layer.scn_rect.x;
+	screen_rect->y = ui_param->layer.scn_rect.y;
+	screen_rect->width = ui_param->layer.scn_rect.width;
+	screen_rect->height = ui_param->layer.scn_rect.height;
+	return EPDK_OK;
+}
+
+//����listbarÿҳ������ʾ����Ŀ����
+__u32 MusicUi_GetListbar_Count(void)
+{
+	__u32 pagenum = 0;
+	music_ui_t *ui_param;
+	ui_param = music_get_ui_param();
+	__msg("list_height = %d,item_height = %d\n",ui_param->list_ctrl.listbar_rect.height,ui_param->list_ctrl.item_rect.height);
+	pagenum = ui_param->list_ctrl.listbar_rect.height / ui_param->list_ctrl.item_rect.height;
+	return pagenum;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+

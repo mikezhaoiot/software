@@ -1,0 +1,1665 @@
+/*
+************************************************************************************************************************
+*											         ePDK
+*						            the Easy Portable/Player Develop Kits
+*									           desktop system
+*
+*						          (c) Copyright 2007-2010, Jackie, China
+*										All Rights Reserved
+*
+* File    		: init_server.c
+* By      		: Jackie.chen
+* Func		: init server
+* Version	: v1.0
+* ======================================================================================================================
+* 2010-10-25  Jackie.chen  create this file, implements the fundemental interface;
+************************************************************************************************************************
+*/
+
+#include "init_server.h"
+
+
+
+#define	AUTO_OFF_TIME_ID		1000
+#define CLOSE_SCN_TIME_ID		1001
+#define LOW_POWER_CHECK_TIME_ID	1002
+#define CURSOR_TIME_ID			1003
+#define LED_FLASH_TIME_ID		1004
+#define ID_TIMER_LOAD_APP		1100
+#define MAX_LowPowerCueCnt		5
+
+extern GUI_FONT    *SWFFont;
+
+static __u8 g_b_enable_standby = 1;
+static __u8 g_b_off_check = 0;
+__u8 g_b_lowpower = 0;
+__s8 g_tconOccupyLcmi_flag = 0;
+__u8 g_screenCloseSel = 0;
+
+
+
+
+void init_lock(__gui_msg_t *msg)
+{
+	__u8 err;
+	__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+	esKRNL_SemPend(init_ctr->state_sem, 0, &err);
+	return;
+}
+
+void init_unlock(__gui_msg_t *msg)
+{
+	__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+	esKRNL_SemPost(init_ctr->state_sem);
+}
+
+static void system_message_handle(void *arg)
+{
+	init_scene_t *p_scene;
+	H_WIN h_wnd = (H_WIN)arg;
+	while(1)
+	{
+		if(esKRNL_TDelReq(OS_PRIO_SELF) == OS_TASK_DEL_REQ)
+		{
+			esKRNL_TDel(OS_PRIO_SELF);
+			return;
+		}
+		p_scene = (init_scene_t *)GUI_WinGetAddData(h_wnd);
+		if(p_scene->orchid_update == EPDK_TRUE)
+		{
+		}
+		esKRNL_TimeDly(1);
+	}
+}
+
+static __s32 sys_msg_handle_init(__gui_msg_t *msg)
+{
+	__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+	/*����system_message_handle �߳� */
+	init_ctr->sys_msg_handle_tid = esKRNL_TCreate(system_message_handle, (void *)msg->h_deswin, 0x800, KRNL_priolevel5);
+	return EPDK_OK;
+}
+
+static __s32 sys_msg_handle_exit(__gui_msg_t *msg)
+{
+	__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+
+	/* ɾ��system_message_handle �߳� */
+	while(esKRNL_TDelReq(init_ctr->sys_msg_handle_tid) != OS_TASK_NOT_EXIST)
+	{
+		esKRNL_TimeDly(1);
+	}
+
+	init_ctr->sys_msg_handle_tid = 0;
+	return EPDK_OK;
+}
+
+static __s32 init_low_power_proc(__gui_msg_t *msg)
+{
+	init_scene_t *p_scene;
+	__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+	p_scene = (init_scene_t *)GUI_WinGetAddData(msg->h_deswin);
+	if(!init_ctr->usb_connect)
+	{
+		activity_finish_all();
+		gscene_bgd_set_state(BGD_STATUS_SHOW);
+		gscene_hbar_set_state(HBAR_ST_HIDE);
+		p_scene->low_power = EPDK_TRUE;
+		scene_on_dialog(msg);
+	}
+	return EPDK_OK;
+}
+
+static __s32 init_restart_close_scn(__gui_msg_t *msg)
+{
+	__bool exist;
+	__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+
+	if(init_ctr->closescn_timeout == 0)
+	{
+		return EPDK_OK;
+	}
+
+	exist = GUI_IsTimerInstalled(msg->h_deswin, init_ctr->close_scn_time_id);
+
+	if(exist == EPDK_TRUE)
+	{
+		GUI_ResetTimer(msg->h_deswin, init_ctr->close_scn_time_id, init_ctr->closescn_timeout, NULL);
+	}
+	else
+	{
+		GUI_SetTimer(msg->h_deswin, init_ctr->close_scn_time_id, init_ctr->closescn_timeout, NULL);
+	}
+
+	return EPDK_OK;
+}
+
+static __s32 init_power_off_proc(__gui_msg_t *msg)
+{
+	__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+	if(!init_ctr->usb_connect)
+	{
+		init_scene_t *p_scene;
+		activity_finish_all();
+		gscene_bgd_set_state(BGD_STATUS_SHOW);
+		gscene_hbar_set_state(HBAR_ST_HIDE);
+		GUI_LyrWinCacheOff();
+		p_scene = (init_scene_t *)GUI_WinGetAddData(msg->h_deswin);
+		p_scene->power_off = EPDK_TRUE;
+		__here__;
+		scene_on_dialog(msg);
+		__here__;
+		if(EPDK_FALSE == p_scene->usb_plug_in)
+		{
+			NOTIFY_MSG(GUI_MSG_CLOSE, 0, msg->h_deswin, 0, 0);
+		}
+	}
+	return EPDK_OK;
+}
+
+static __s32 init_usb_device_plugin_proc(__gui_msg_t *msg)
+{	
+	init_scene_t *p_scene;
+	__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);	
+	p_scene = (init_scene_t *)GUI_WinGetAddData(msg->h_deswin);
+	/* ֪ͨ��������������Ӧ�ó����˳� */
+	init_ctr->usb_connect = EPDK_TRUE;
+
+	{
+		__gui_msg_t p_msg;	
+		//��֪ͨ�����潫ͼ������
+		if(p_msg.h_deswin = GUI_WinGetHandFromName("app_home"))
+		{
+			p_msg.h_srcwin = NULL;
+			p_msg.id = DSK_MSG_USBD_PLUG_IN;
+			p_msg.dwAddData1 = 0;
+			p_msg.dwAddData2 = 0;
+			p_msg.dwReserved = 0;
+
+			GUI_SendMessage(&p_msg);
+		}
+	}
+	
+	activity_finish_all();
+	if(dsk_wkm_is_open())
+	{
+		dsk_wkm_close();
+	}
+	gscene_bgd_set_state(BGD_STATUS_SHOW);
+	gscene_hbar_set_state(HBAR_ST_HIDE);
+	gscene_bgd_set_default_bg_index(m_eBgdIdx_setting);
+	p_scene->usb_connect = EPDK_TRUE;
+	scene_on_dialog(msg);
+	return EPDK_OK;
+}
+
+static __s32 init_usb_device_plugout_proc(__gui_msg_t *msg)
+{	
+	init_scene_t *p_scene;
+	__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+	p_scene = (init_scene_t *)GUI_WinGetAddData(msg->h_deswin);
+	init_ctr->usb_connect = EPDK_FALSE;	
+	p_scene->usb_connect  = EPDK_FALSE;
+	scene_on_dialog(msg);
+	p_scene->usb_plug_in = EPDK_FALSE;
+	return EPDK_OK;
+}
+
+/* ֪ͨ��Ӧ�ó��� ����orchid��ʼ */
+static __s32 init_orchid_update_start(__gui_msg_t *msg)
+{
+	{
+		init_scene_t *p_scene;
+		p_scene = (init_scene_t *)GUI_WinGetAddData(msg->h_deswin);
+		p_scene->orchid_update = EPDK_TRUE;
+		scene_on_dialog(msg);
+	}
+	return EPDK_OK;
+}
+
+/* ֪ͨ��Ӧ�ó��� ����orchid���� */
+static __s32 init_orchid_update_end(__gui_msg_t *msg)
+{
+	{
+		init_scene_t *p_scene;
+		p_scene = (init_scene_t *)GUI_WinGetAddData(msg->h_deswin);
+		p_scene->orchid_update = EPDK_FALSE;
+	}
+	return EPDK_OK;
+}
+
+static void init_screen_onoff(__gui_msg_t *msg)
+{
+	__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+	__disp_output_type_t output = dsk_display_get_output_type();
+
+	if((output == DISP_OUTPUT_TYPE_NONE) || (output == DISP_OUTPUT_TYPE_LCD))
+	{
+		if(init_ctr->screen_close_done)
+		{
+			NOTIFY_MSG(DSK_MSG_SCREEN_OPEN, NULL, msg->h_deswin, 0, 0);
+		}
+		else
+		{
+			SEND_MSG(DSK_MSG_SCREEN_FORCE_CLOSE, msg->h_deswin, GUI_WinGetHandFromName("init"), 0, 0);
+		}
+	}
+}
+static __s32 init_close_screen(__gui_msg_t *msg, __bool forceflag)
+{
+	__bool is_host_working;
+	__disp_output_type_t output;
+    __bool is_echo_on;
+	__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+	output = dsk_display_get_output_type();
+	if((output == DISP_OUTPUT_TYPE_LCD && !init_ctr->usb_connect) || forceflag)//add by Kingvan
+	{
+		init_lock(msg);
+		if(!init_ctr->screen_close_done)
+		{
+			init_ctr->screen_close_done = EPDK_TRUE;
+			init_unlock(msg);
+			dsk_display_lcd_off(g_screenCloseSel);
+		}
+		else
+		{
+			init_unlock(msg);
+		}
+	}
+	return EPDK_OK;
+}
+
+/**
+ * ����
+ */
+static __s32 init_open_screen(__gui_msg_t *msg)
+{
+	__bool exist;
+	__disp_output_type_t output;
+	__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+	init_scene_t *p_scene 	= (init_scene_t *)GUI_WinGetAddData(msg->h_deswin);
+
+	//__here__;
+	if(g_tconOccupyLcmi_flag)
+	{
+		return EPDK_FAIL;
+	}
+	if(g_screenCloseSel == OP_SCREENOFF_BUT_BKON)
+	{
+		g_screenCloseSel = 0;
+	}
+	output = dsk_display_get_output_type();
+	if((output == DISP_OUTPUT_TYPE_NONE) || (output == DISP_OUTPUT_TYPE_LCD))
+	{
+		__here__;
+		init_lock(msg);
+		__here__;
+		if(init_ctr->screen_close_done)	/* ��Ļ�Ѿ��ر� */
+		{
+			__here__;
+			init_unlock(msg);
+			__here__;
+			dsk_display_lcd_on();				/* ������ʾ����, ����*/
+			init_lock(msg);
+			init_ctr->screen_close_done = EPDK_FALSE;/* 	�����״̬λ */
+			init_unlock(msg);
+		}
+		else									/* ��Ļ��û�ر� */
+		{
+            __here__;
+			init_unlock(msg);
+		}
+        __here__;
+		exist = GUI_IsTimerInstalled(msg->h_deswin, init_ctr->close_scn_time_id);
+        __here__;
+		if(exist == EPDK_TRUE)
+		{
+			GUI_ResetTimer(msg->h_deswin, init_ctr->close_scn_time_id, init_ctr->closescn_timeout, NULL);  
+		}
+        __here__;
+	}
+
+	return EPDK_OK;
+}
+
+/**
+ * �����Զ�����ʱ��
+ */
+static __s32 init_set_close_scn(__gui_msg_t *msg)
+{
+	__bool exist;
+	__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+
+	if(msg->dwAddData1 == 0)
+	{
+		init_ctr->closescn_timeout = 0;//add by Kingvan
+		exist = GUI_IsTimerInstalled(msg->h_deswin, init_ctr->close_scn_time_id);
+
+		if(exist == EPDK_TRUE)
+		{
+			GUI_KillTimer(msg->h_deswin, init_ctr->close_scn_time_id);
+		}
+	}
+	else if(msg->dwAddData1 > 0)
+	{
+		init_ctr->closescn_timeout = msg->dwAddData1 / 10;
+		exist = GUI_IsTimerInstalled(msg->h_deswin, init_ctr->close_scn_time_id);
+
+		if(exist == EPDK_TRUE)
+		{
+			GUI_ResetTimer(msg->h_deswin, init_ctr->close_scn_time_id, init_ctr->closescn_timeout, NULL);
+		}
+		else
+		{
+			GUI_SetTimer(msg->h_deswin, init_ctr->close_scn_time_id, init_ctr->closescn_timeout, NULL);
+		}
+	}
+	else
+	{
+		__wrn(" close screen time < 0, set fail \n");
+	}
+
+	return EPDK_OK;
+}
+
+/**
+ * �����Զ��ػ�ʱ��
+ */
+static __s32 init_set_auto_off(__gui_msg_t *msg)
+{
+	__bool exist;
+	__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+	init_ctr->autooff_timeout = 0;
+
+	if(msg->dwAddData1 == 0)
+	{
+		exist = GUI_IsTimerInstalled(msg->h_deswin, init_ctr->auto_off_time_id);
+
+		if(exist == EPDK_TRUE)
+		{
+			GUI_KillTimer(msg->h_deswin, init_ctr->auto_off_time_id);
+		}
+	}
+	else if(msg->dwAddData1 > 0)
+	{
+		init_ctr->autooff_timeout = msg->dwAddData1 / 10;
+		exist = GUI_IsTimerInstalled(msg->h_deswin, init_ctr->auto_off_time_id);
+
+		if(exist == EPDK_TRUE)
+		{
+			GUI_ResetTimer(msg->h_deswin, init_ctr->auto_off_time_id, init_ctr->autooff_timeout, NULL);
+		}
+		else
+		{
+			GUI_SetTimer(msg->h_deswin, init_ctr->auto_off_time_id, init_ctr->autooff_timeout, NULL);
+		}
+	}
+	else
+	{
+		__wrn(" auto off time < 0, set fail \n");
+	}
+
+	return EPDK_OK;
+}
+
+static __s32 init_scene_create(__gui_msg_t *msg)
+{
+	SIZE screen_size;
+	init_screen_size();
+	dialog_init(msg->h_deswin);
+	gscene_hbar_create(msg->h_deswin, HBAR_FOARMAT_32BPP);
+	return EPDK_OK;
+}
+
+static __s32 init_scene_destroy(__gui_msg_t *msg)
+{
+	init_scene_t *p_scene = (init_scene_t *)GUI_WinGetAddData(msg->h_deswin);
+	dialog_deinit(msg->h_deswin);
+	__here__;
+	gscene_hbar_delete();
+	__here__;
+	return EPDK_OK;
+}
+
+static RECT fw_update_prog_draw_init(fw_update_res_t *prog_ui, RECT rectHlyr)
+{
+	int i,j;
+	RECT rect = {0, 0, _W(618), _H(122)};
+
+	rect.x = (rectHlyr.width -rect.width) /2;
+	rect.y = (rectHlyr.height-rect.height) /2;
+	prog_ui[fw_update_prog_bg].res_id[0] 	 = ID_INIT_PROG_BG_BMP;
+	prog_ui[fw_update_prog_left].res_id[0]   = ID_INIT_PROG_LEFT_BMP;
+	prog_ui[fw_update_prog_right].res_id[0]  = ID_INIT_PROG_RIGHT_BMP;
+	prog_ui[fw_update_prog_mid].res_id[0] 	 = ID_INIT_PROG_MID_BMP;
+	prog_ui[fw_update_prog_finish].res_id[0] = ID_INIT_UPDATE_FINISH_BMP;
+	for(i = 0 ; i < fw_update_prog_icon_num ; i++)
+	{
+		for(j = 0 ; j < INIT_FW_UPDATE_MAX_ICON_RES_NUM ; j++)
+		{
+			if(prog_ui[i].res_id[j])
+			{
+				prog_ui[i].res_hdl[j] = dsk_theme_open(prog_ui[i].res_id[j]);
+
+				if(!prog_ui[i].res_hdl[j])
+				{
+					__wrn("dsk_theme_open(prog_ui[%d].res_id[%d]) fail...\n", i, j);
+				}
+				else//�ȶ�ȡnor����ռס���ڴ�
+				{
+					prog_ui[i].res_buf[j] = dsk_theme_hdl2buf(prog_ui[i].res_hdl[j]);
+				}
+			}
+		}
+	}
+	prog_ui[fw_update_draw_rect].x = rect.x;
+	prog_ui[fw_update_draw_rect].y = rect.y;
+	prog_ui[fw_update_draw_rect].w = rect.width;
+	prog_ui[fw_update_draw_rect].h = rect.height;
+
+	if(prog_ui[fw_update_prog_bg].res_buf[0])
+	{
+		prog_ui[fw_update_prog_bg].w = GUI_BMP_GetXSize(prog_ui[fw_update_prog_bg].res_buf[0]);
+		prog_ui[fw_update_prog_bg].h = GUI_BMP_GetYSize(prog_ui[fw_update_prog_bg].res_buf[0]);
+		prog_ui[fw_update_prog_bg].x = rect.x +(rect.width - prog_ui[fw_update_prog_bg].w) / 2;
+		prog_ui[fw_update_prog_bg].y = rect.y;
+	}
+	
+	if(prog_ui[fw_update_prog_left].res_buf[0])
+	{
+		prog_ui[fw_update_prog_left].w = GUI_BMP_GetXSize(prog_ui[fw_update_prog_left].res_buf[0]);
+		prog_ui[fw_update_prog_left].h = GUI_BMP_GetYSize(prog_ui[fw_update_prog_left].res_buf[0]);
+		prog_ui[fw_update_prog_left].x = prog_ui[fw_update_prog_bg].x;
+		prog_ui[fw_update_prog_left].y = prog_ui[fw_update_prog_bg].y;
+	}
+	
+	if(prog_ui[fw_update_prog_right].res_buf[0])
+	{
+		prog_ui[fw_update_prog_right].w = GUI_BMP_GetXSize(prog_ui[fw_update_prog_right].res_buf[0]);
+		prog_ui[fw_update_prog_right].h = GUI_BMP_GetYSize(prog_ui[fw_update_prog_right].res_buf[0]);
+		prog_ui[fw_update_prog_right].x = prog_ui[fw_update_prog_bg].x;
+		prog_ui[fw_update_prog_right].y = prog_ui[fw_update_prog_bg].y;
+	}
+	
+	if(prog_ui[fw_update_prog_mid].res_buf[0])
+	{
+		prog_ui[fw_update_prog_mid].w = GUI_BMP_GetXSize(prog_ui[fw_update_prog_mid].res_buf[0]);
+		prog_ui[fw_update_prog_mid].h = GUI_BMP_GetYSize(prog_ui[fw_update_prog_mid].res_buf[0]);
+		prog_ui[fw_update_prog_mid].x = prog_ui[fw_update_prog_bg].x;
+		prog_ui[fw_update_prog_mid].y = prog_ui[fw_update_prog_bg].y;
+	}
+	
+	if(prog_ui[fw_update_prog_cursor].res_buf[0])
+	{
+		prog_ui[fw_update_prog_cursor].w = GUI_BMP_GetXSize(prog_ui[fw_update_prog_cursor].res_buf[0]);
+		prog_ui[fw_update_prog_cursor].h = GUI_BMP_GetYSize(prog_ui[fw_update_prog_cursor].res_buf[0]);
+		prog_ui[fw_update_prog_cursor].x = prog_ui[fw_update_prog_bg].x;
+		prog_ui[fw_update_prog_cursor].y = prog_ui[fw_update_prog_bg].y;
+	}
+	
+	if(prog_ui[fw_update_prog_finish].res_buf[0])
+	{
+		prog_ui[fw_update_prog_finish].w = GUI_BMP_GetXSize(prog_ui[fw_update_prog_finish].res_buf[0]);
+		prog_ui[fw_update_prog_finish].h = GUI_BMP_GetYSize(prog_ui[fw_update_prog_finish].res_buf[0]);
+		prog_ui[fw_update_prog_finish].x = rect.x +(rect.width - prog_ui[fw_update_prog_finish].w) / 2;
+		prog_ui[fw_update_prog_finish].y = rect.y + rect.height -prog_ui[fw_update_prog_finish].h -1;
+	}
+
+	prog_ui[fw_update_str_updating].x = rect.x;
+	prog_ui[fw_update_str_updating].y = rect.y +rect.height -BEETLES_FONT_SIZE_INT -1;
+	prog_ui[fw_update_str_updating].w = rect.width;
+	prog_ui[fw_update_str_updating].h = BEETLES_FONT_SIZE_INT;
+
+	return rect;
+}
+
+static __s32 fw_update_prog_draw(fw_update_res_t *prog_ui,__s32 min, __s32 max, __s32 cur)
+{
+	
+	__s32 mid_w,max_mid_w,cursor_w,cursor_pos,bg_pos,bg_w;
+	char str_text[128];
+	static __s32 s_progIdx = 0;
+	fw_update_res_t *prog_bg = &prog_ui[fw_update_prog_bg], 
+	*prog_left 			= &prog_ui[fw_update_prog_left],
+	*prog_right 		= &prog_ui[fw_update_prog_right],
+	*prog_mid 			= &prog_ui[fw_update_prog_mid],
+	*prog_cursor 		= &prog_ui[fw_update_prog_cursor],
+	*prog_str_updating 	= &prog_ui[fw_update_str_updating];
+	__s32 progCurLen,progTotalLen = (prog_bg->w - prog_cursor->w) / prog_mid->w;
+	__s32 focus = 0;
+	GUI_RECT gui_rect;	
+	if(cur > max)
+	{
+		cur = max;
+	}
+	if(cur < min)
+	{
+		cur = min;
+	}
+	
+	if(cur == min)
+	{
+		progCurLen = 0;
+	}
+	else
+	{
+		progCurLen = progTotalLen * (cur - min) / (max - min);
+	}
+
+	mid_w = prog_mid->w;
+	max_mid_w = prog_bg->w - prog_cursor->w;
+	cursor_w = prog_cursor->w;
+	bg_pos = prog_bg->x;
+	bg_w = prog_bg->w;
+	//��ֹ��������ʱ������
+	if(max_mid_w - progCurLen * mid_w < mid_w)
+	{
+		progCurLen++;
+		cursor_pos = bg_pos + bg_w - cursor_w;
+	}
+	else
+	{
+		cursor_pos = bg_pos + progCurLen * mid_w;
+	}
+	if(!s_progIdx)
+	{
+		dsk_langres_get_menu_text(STRING_FW_UPDATE, str_text, sizeof(str_text));
+		gui_rect.x0 = prog_str_updating->x;
+		gui_rect.x1 = gui_rect.x0 +prog_str_updating->w - 1;
+		gui_rect.y0 = prog_str_updating->y;
+		gui_rect.y1 = gui_rect.y0 +prog_str_updating->h - 1;
+		GUI_DispStringInRect(str_text, &gui_rect, GUI_TA_HCENTER | GUI_TA_TOP);	
+		//������������
+		if(prog_bg->res_buf[focus])
+		{
+			GUI_BMP_Draw(prog_bg->res_buf[focus], prog_bg->x, prog_bg->y);
+			__here__;
+			__msg("prog_bg:0x%X, (%d,%d)\n", prog_bg->res_buf[focus], prog_bg->x, prog_bg->y);
+		}
+		s_progIdx++;	
+	}
+	for(; s_progIdx < progCurLen ; s_progIdx++)
+	{
+		if(s_progIdx == 1)
+		{
+			//����������ߵ�ͼ��
+			if(prog_left->res_buf[focus])
+			{
+				GUI_BMP_Draw(prog_left->res_buf[focus], prog_left->x, prog_left->y);
+				__here__;
+			}
+		}
+		else if(s_progIdx == progTotalLen)
+		{
+			//���������ұߵ�ͼ��
+			if(prog_right->res_buf[focus])
+			{
+				GUI_BMP_Draw(prog_right->res_buf[focus], prog_mid->x + prog_mid->w*(s_progIdx-1), prog_mid->y);
+				__here__;
+			}
+			esKRNL_TimeDly(200);
+			gui_rect.x0 = prog_str_updating->x;
+			gui_rect.x1 = gui_rect.x0 +prog_str_updating->w - 1;
+			gui_rect.y0 = prog_str_updating->y;
+			gui_rect.y1 = gui_rect.y0 +prog_str_updating->h - 1;
+			GUI_ClearRectEx(&gui_rect);
+			GUI_BMP_Draw(prog_ui[fw_update_prog_finish].res_buf[0],
+				prog_ui[fw_update_prog_finish].x,prog_ui[fw_update_prog_finish].y);
+		}
+		else
+		{
+			if(prog_mid->res_buf[focus])
+			{
+				GUI_BMP_Draw(prog_mid->res_buf[focus], prog_mid->x + prog_mid->w*(s_progIdx-1), prog_mid->y);
+				__here__;
+			} 							
+			if(prog_cursor->res_buf[focus])
+			{
+				GUI_BMP_Draw(prog_cursor->res_buf[focus], cursor_pos, prog_cursor->y);
+				__here__;
+			}
+		}
+	}
+	return EPDK_OK;
+}
+
+static __s32 fw_update(H_LYR hlyr, char *fw_path)
+{
+	__u8 	mid_update;
+	__mp 	*mod_update;
+	__s32 progress;
+	RECT rectHlyr;
+	fw_update_res_t prog_ui[fw_update_prog_icon_num];
+	if(!hlyr)
+	{
+		__wrn("fw_update: hlyr is NULL!\n");
+		return;
+	}
+	
+	GUI_LyrWinGetScnWindow(hlyr, &rectHlyr);
+		
+	memset(prog_ui, 0, sizeof(prog_ui));
+	fw_update_prog_draw_init(prog_ui, rectHlyr);
+	
+	GUI_LyrWinSetSta(hlyr, GUI_LYRWIN_STA_ON);
+	GUI_LyrWinSetTop(hlyr);
+	GUI_LyrWinSel(hlyr);
+	GUI_SetFont(SWFFont);
+	GUI_SetDrawMode(GUI_DRAWMODE_TRANS);
+	GUI_SetColor(GUI_BLACK);
+	GUI_SetBkColor(0);
+	GUI_CharSetToEncode(EPDK_CHARSET_ENM_UTF8);
+	fw_update_prog_draw(prog_ui, 0, 100, 0);                          
+	mid_update = esMODS_MInstall(BEETLES_APP_ROOT"mod\\update.mod", 0);
+	if(mid_update == 0)
+	{
+		__err("update mod install error \n");
+		return EPDK_FAIL;
+	}
+
+	mod_update = esMODS_MOpen(mid_update, 0);
+
+	if(mod_update == NULL)
+	{
+		__err("open update mode error \n");
+		esMODS_MUninstall(mid_update);
+		return EPDK_FAIL;
+	}
+	esMODS_MIoctrl(mod_update, UPDATE_CMD_START, 0, (void *)fw_path);
+	while(1)
+	{
+		esKRNL_TimeDly(50);
+		progress = esMODS_MIoctrl(mod_update, UPDATE_CMD_CHECK_PROG, 0, 0);
+		if(EPDK_FAIL == progress)
+		{
+			__err("error occur\n");
+			break;
+		}
+		fw_update_prog_draw(prog_ui, 0, 100, progress);
+		if(100 == progress)
+		{
+			esKRNL_TimeDly(250);
+			dsk_display_lcd_off(OP_SCREENOFF_AND_BKOFF);
+			eLIBs_printf("system reset...");
+			esKRNL_TimeDly(50);
+			esKSRV_Reset();
+			esMODS_MIoctrl(mod_update, UPDATE_CMD_STOP, 0, 0);
+			__msg(" ioctrl mod update UPDATE_CMD_STOP end\n");
+		}
+	}
+	esMODS_MClose(mod_update);
+	esMODS_MUninstall(mid_update);
+	return EPDK_OK;
+}
+
+static __s32 init_mainwin_cb(__gui_msg_t *msg)
+{
+	switch(msg->id)
+	{
+		case GUI_MSG_CREATE:
+		{
+			__init_ctl_t *init_ctr;
+			init_scene_t *p_scene;
+			init_ctr = (__init_ctl_t *)eLIBs_malloc(sizeof(__init_ctl_t));
+			if(!init_ctr)
+			{
+				__err("init_ctr malloc error \n");
+				return EPDK_FAIL;
+			}
+			eLIBs_memset(init_ctr, 0, sizeof(__init_ctl_t));
+			GUI_WinSetAttr(msg->h_deswin, (void *)init_ctr);
+			p_scene = (init_scene_t *)eLIBs_malloc(sizeof(init_scene_t));
+			if(!p_scene)
+			{
+				__err("p_scene malloc error \n");
+				return EPDK_FAIL;
+			}
+
+			eLIBs_memset(p_scene, 0, sizeof(init_scene_t));
+			GUI_WinSetAddData(msg->h_deswin, (__u32)p_scene);
+			p_scene->init_win = msg->h_deswin;
+			init_ctr->low_power_check_time_id	= LOW_POWER_CHECK_TIME_ID;
+			init_ctr->cursor_time_id			= CURSOR_TIME_ID;
+			init_ctr->close_scn_time_id	   		= CLOSE_SCN_TIME_ID;
+			init_ctr->led_flash_time_id			= LED_FLASH_TIME_ID;
+			init_ctr->led_flash_timeout         = 25;
+			init_ctr->low_power_check_timeout	= 100;							
+			init_ctr->cursor_timeout   			= 500;							
+			
+			GUI_SetTimer(msg->h_deswin, ID_TIMER_LOAD_APP, 100, NULL);
+			GUI_SetTimer(msg->h_deswin, init_ctr->led_flash_time_id, init_ctr->led_flash_timeout, NULL);
+			GUI_SetTimer(msg->h_deswin, init_ctr->low_power_check_time_id, init_ctr->low_power_check_timeout, NULL);
+
+			if(init_ctr->closescn_timeout != 0)
+			{
+				GUI_SetTimer(msg->h_deswin, init_ctr->close_scn_time_id, init_ctr->closescn_timeout, NULL);
+			}
+			/* �����ź��� */
+			init_ctr->state_sem = esKRNL_SemCreate(1);
+			init_ctr->closescn_gate_on 	= EPDK_TRUE;
+			init_ctr->usb_connect 	   	= EPDK_FALSE;
+			init_ctr->screen_close_done = EPDK_FALSE;
+			init_ctr->tp_msg_enble	   	= EPDK_TRUE;
+			init_ctr->key_msg_enble	   	= EPDK_TRUE;
+			init_server_init();
+			init_scene_create(msg);
+			sys_msg_handle_init(msg);
+			break;
+		}
+
+		case GUI_MSG_DESTROY:
+		{
+			__u8 err;
+			__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+			init_scene_t *p_scene = (init_scene_t *)GUI_WinGetAddData(msg->h_deswin);
+
+			if(GUI_IsTimerInstalled(msg->h_deswin, ID_TIMER_LOAD_APP))
+			{
+				GUI_KillTimer(msg->h_deswin, ID_TIMER_LOAD_APP);
+			}
+			if(GUI_IsTimerInstalled(msg->h_deswin, init_ctr->low_power_check_time_id))
+			{
+				GUI_KillTimer(msg->h_deswin, init_ctr->low_power_check_time_id);
+			}
+
+			if(GUI_IsTimerInstalled(msg->h_deswin, init_ctr->cursor_time_id))
+			{
+				GUI_KillTimer(msg->h_deswin, init_ctr->cursor_time_id);
+			}
+			if(GUI_IsTimerInstalled(msg->h_deswin, init_ctr->auto_off_time_id))
+			{
+				GUI_KillTimer(msg->h_deswin, init_ctr->auto_off_time_id);
+			}
+
+			if(GUI_IsTimerInstalled(msg->h_deswin, init_ctr->close_scn_time_id))
+			{
+				GUI_KillTimer(msg->h_deswin, init_ctr->close_scn_time_id);
+			}
+			if(GUI_IsTimerInstalled(msg->h_deswin, init_ctr->led_flash_time_id))
+			{
+				GUI_KillTimer(msg->h_deswin, init_ctr->led_flash_time_id);
+			}
+			esKRNL_SemDel(init_ctr->state_sem, 0, &err);
+			sys_msg_handle_exit(msg);
+			init_scene_destroy(msg);
+			live_exit();
+			eLIBs_free(init_ctr);
+			eLIBs_free(p_scene);
+			break;
+		}
+		case GUI_MSG_CLOSE:
+			GUI_ManWinDelete(msg->h_deswin);
+			break;
+		case GUI_MSG_TIMER:
+		{
+			init_scene_t *p_scene;
+			__init_ctl_t *init_ctr;
+			init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+			p_scene = (init_scene_t *)GUI_WinGetAddData(msg->h_deswin);
+
+			if(msg->dwAddData1 == init_ctr->cursor_time_id)  //������ʱ��
+			{
+				GUI_CursorHide();
+			}
+			else if(msg->dwAddData1 == init_ctr->low_power_check_time_id)  //�͵���
+			{
+				static __u8 wait_exit_time = 0;
+				{
+					static __u8 s_1sCnt = 0;
+
+					if(++s_1sCnt >= 10)
+					{
+						s_1sCnt = 0;
+						LogoBufRelease();
+					}
+				}
+				if(g_b_lowpower)
+				{
+					__here__;
+					GUI_KillTimer(msg->h_deswin, init_ctr->low_power_check_time_id);
+					if(init_ctr->low_send_flag == 0)
+					{
+						__gui_msg_t         ntymsg;
+						ntymsg.id           =  DSK_MSG_HOME_POWER_OFF;
+						ntymsg.h_srcwin     =  NULL;
+						ntymsg.h_deswin     =  GUI_WinGetHandFromName("beetles"); 
+						ntymsg.dwAddData1   =  NULL;
+						ntymsg.dwAddData2   =  NULL;
+						ntymsg.dwReserved   =  NULL;
+						GUI_SendMessage(&ntymsg); 
+						init_ctr->low_send_flag = 1;
+					} 
+					while(1)
+					{
+						esKRNL_TimeDly(20);
+						if(get_low_wait_exit_app_state())
+						{
+							break;
+						}
+						wait_exit_time++;
+						if(wait_exit_time > 20)
+						{
+							break;
+						}
+					}
+					if(wait_exit_time > 20)
+					{
+						dsk_reg_flush(REG_APP_SYSTEM);
+						esKSRV_Reset();
+					}
+					SEND_MSG(DSK_MSG_POWER_OFF, NULL, msg->h_deswin, 0, 0);					
+					__wrn("SEND_MSG(DSK_MSG_POWER_OFF)\n");
+					break;
+				}
+
+				if(dsk_power_is_low() == EPDK_TRUE)  //�͵�
+				{
+                    reg_system_para_t	 *system_para;	
+					system_para = (reg_system_para_t *)dsk_reg_get_para_by_app(REG_APP_SYSTEM);
+					system_para->m_ePowerOffType = m_ePowerOffType_lowPower;
+					if(init_ctr->low_send_flag == 0)
+					{
+						__gui_msg_t         ntymsg;
+						ntymsg.id           =  DSK_MSG_HOME_POWER_OFF;
+						ntymsg.h_srcwin     =  NULL;
+						ntymsg.h_deswin     =  GUI_WinGetHandFromName("beetles"); 
+						ntymsg.dwAddData1   =  NULL;
+						ntymsg.dwAddData2   =  NULL;
+						ntymsg.dwReserved   =  NULL;
+						GUI_SendMessage(&ntymsg); 
+						init_ctr->low_send_flag = 1;
+					}  
+					while(1)
+					{
+						esKRNL_TimeDly(20);
+						if(get_low_wait_exit_app_state())
+						{
+							break;
+						}
+						wait_exit_time++;
+						if(wait_exit_time > 20)
+						{
+							break;
+						}
+					}
+					if(wait_exit_time > 20)
+					{
+						dsk_reg_flush(REG_APP_SYSTEM);
+						wait_exit_time = 0;
+						esKSRV_Reset();
+					}
+					SEND_MSG(DSK_MSG_SCREEN_OPEN, NULL, msg->h_deswin, 0, 0);
+					SEND_MSG(DSK_MSG_LOW_POWER, NULL, msg->h_deswin, 0, 0);
+					if(g_b_lowpower >= MAX_LowPowerCueCnt)
+					{
+						dsk_reg_flush(REG_APP_SYSTEM);
+						esKSRV_Reset();
+					}
+				}
+				else
+				{
+					//����ִ��ʷŵ絼�µ͵磬�����ڶ�ʱ���ڵ�ѹ�����������������.
+					if(g_b_lowpower)
+					{
+						g_b_lowpower = 0;
+						wait_exit_time = 0;
+						dsk_reg_flush(REG_APP_SYSTEM);
+						esKSRV_Reset();
+						break;
+					}
+				}
+			}
+			else if(msg->dwAddData1 == LED_FLASH_TIME_ID)
+			{
+				#if (!SP_DEV_HW_PW_OFF)
+				{
+					IOCTRL__PWOFF_DET__SET_OFF();
+					{
+						__u32 i = 100;
+
+						while(i--);
+					}
+					if(IOCTRL__PWOFF_DET__IS_OFF())
+					{
+						if(g_b_off_check)
+						{
+
+							if(GUI_IsTimerInstalled(msg->h_deswin, ID_TIMER_LOAD_APP))
+							{
+								GUI_KillTimer(msg->h_deswin, ID_TIMER_LOAD_APP);
+							}
+							SEND_MSG(DSK_MSG_SCREEN_OPEN, NULL, msg->h_deswin, 0, 0);
+							SEND_MSG(DSK_MSG_POWER_OFF, NULL, msg->h_deswin, 0, 0);							
+						}
+						else
+						{
+							g_b_off_check = 1;
+						}
+					}
+					else
+					{
+						g_b_off_check = 0;
+					}
+				}
+				#endif
+				
+				IOCTRL__PWON__SET_ON();
+			}
+			else if(msg->dwAddData1 == LOW_POWER_DIALOG_TIME_ID)  
+			{
+				p_scene->low_power = EPDK_FALSE;
+				GUI_KillTimer(msg->h_deswin, LOW_POWER_DIALOG_TIME_ID);
+				scene_on_dialog(msg);
+			}
+			else if(msg->dwAddData1 == POWER_OFF_DIALOG_TIME_ID)  
+			{
+				__here__;
+				p_scene->power_off = EPDK_FALSE;
+				GUI_KillTimer(msg->h_deswin, POWER_OFF_DIALOG_TIME_ID);
+				scene_on_dialog(msg);
+				__here__;
+			}
+			else if(msg->dwAddData1 == ORCHID_UPDATE_DIALOG_TIME_ID)  
+			{
+				if(p_scene->orchid_update == EPDK_FALSE)
+				{
+					GUI_KillTimer(msg->h_deswin, ORCHID_UPDATE_DIALOG_TIME_ID);
+					scene_on_dialog(msg);
+				}
+			}
+			else if(msg->dwAddData1 == init_ctr->close_scn_time_id)  
+			{
+				__here__;
+				SEND_MSG(DSK_MSG_SCREEN_CLOSE, NULL, msg->h_deswin, 0, 0);
+				__here__;
+			}
+
+			else if(msg->dwAddData1 == ID_TIMER_LOAD_APP)
+			{
+				GUI_KillTimer(msg->h_deswin, ID_TIMER_LOAD_APP);
+				activity_load_app("application://app_root");
+			}
+			else
+			{
+				__wrn(" unknown msg timer id = %d \n", msg->dwAddData1);
+			}
+
+			break;
+		}
+
+		case GUI_MSG_KEY:
+		{
+ 			__init_ctl_t *init_ctr;
+			init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+			Funprintf("--init dw1 = %d dw2 = %d--\n",msg->dwAddData1,msg->dwAddData2);
+ 			if(EPDK_TRUE == GUI_IsTimerInstalled(msg->h_deswin, init_ctr->close_scn_time_id))
+			{
+				GUI_ResetTimer(msg->h_deswin, init_ctr->close_scn_time_id, init_ctr->closescn_timeout, NULL);
+			}
+ 			switch(msg->dwAddData1)
+			{
+				case GUI_MSG_KEY_LOCKSCREEN:
+				case GUI_MSG_KEY_LONGLOCKSCREEN:
+				{
+					if(g_tconOccupyLcmi_flag)
+					{
+						return GUI_ManWinDefaultProc(msg);
+					}
+					else
+					{
+						if(KEY_UP_ACTION == msg->dwAddData2)
+						{
+							init_screen_onoff(msg);
+						}
+
+						return EPDK_OK;
+					}
+				}	
+				case GUI_MSG_KEY_ENTER:
+				case GUI_MSG_KEY_LONGENTER:
+				case GUI_MSG_KEY_MENU:
+				case GUI_MSG_KEY_LONGMENU:
+				{
+					if(msg->dwAddData2 != KEY_UP_ACTION)
+					{
+						reg_system_para_t* para;
+						para = (reg_system_para_t*)dsk_reg_get_para_by_app(REG_APP_SYSTEM);
+						if(para)
+						{
+							para->m_knlTime = esKRNL_Time();
+						}
+					}
+					return GUI_ManWinDefaultProc(msg);
+				}
+					
+				default:
+					return GUI_ManWinDefaultProc(msg);
+			}
+ 			break;
+		}
+
+		case GUI_MSG_TOUCH:
+		{
+			__bool  exist;
+			__pos_t pos;
+			__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+			exist = GUI_IsTimerInstalled(msg->h_deswin, init_ctr->close_scn_time_id);
+			if(exist == EPDK_TRUE)
+			{
+				GUI_ResetTimer(msg->h_deswin, init_ctr->close_scn_time_id, init_ctr->closescn_timeout, NULL);
+			}
+			pos.x = LOSWORD(msg->dwAddData2);
+			pos.y = HISWORD(msg->dwAddData2);
+			exist = GUI_IsTimerInstalled(msg->h_deswin, init_ctr->cursor_time_id);
+			if(exist == EPDK_TRUE)
+			{
+				GUI_ResetTimer(msg->h_deswin, init_ctr->cursor_time_id, init_ctr->cursor_timeout, NULL);
+			}
+			return GUI_ManWinDefaultProc(msg);
+		}
+
+		case HEADBAR_CMD_SET_FORMAT:
+		{
+			break;
+		}
+		case DSK_MSG_USBD_PLUG_IN:				/* usb device plug in */
+		{
+			__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+			init_scene_t *p_scene;
+			__bool        other_dlg_exist;//����usbʱ���Ƿ��������ģʽ��
+			p_scene = (init_scene_t *)GUI_WinGetAddData(msg->h_deswin);
+			if(EPDK_TRUE == p_scene->usb_plug_in)
+			{
+				return EPDK_OK;
+			}
+			//��ǰ����usb���ӱ�־����ֹusb����ʱ���͵���߹ػ��Ի���ǿ�ƹرպ���������ܣ�����Ӧ�ñ�����
+			p_scene->usb_plug_in = EPDK_TRUE;
+			__here__;
+			other_dlg_exist = EPDK_FALSE;
+			//����usb��ʱ���ֹ�Զ������͹ػ�
+			init_ctr->closescn_timer_exist = GUI_IsTimerInstalled(msg->h_deswin, init_ctr->close_scn_time_id);
+
+			if(EPDK_TRUE == init_ctr->closescn_timer_exist)
+			{
+				GUI_KillTimer(msg->h_deswin, init_ctr->close_scn_time_id);
+			}
+
+			// ��ֹ��Ϣ��Ӧ
+			init_ctr->tp_msg_enble = EPDK_FALSE;
+			__here__;
+			//USB���ӵ�����ʱ����ܴ�ʱ��ʾ���ڹػ����ߵ͵�Ի����Ƚ���������
+			//�������ñ�ǲ����������ܣ��Ӷ����ػ���
+			__msg("p_scene->power_off=%d\n", p_scene->power_off);
+
+			if(p_scene->power_off == EPDK_TRUE)
+			{
+				other_dlg_exist = EPDK_TRUE;
+				__here__;
+				p_scene->power_off = EPDK_FALSE;
+
+				if(GUI_IsTimerInstalled(msg->h_deswin, POWER_OFF_DIALOG_TIME_ID))
+				{
+					__here__;
+					GUI_KillTimer(msg->h_deswin, POWER_OFF_DIALOG_TIME_ID);
+					scene_on_dialog(msg);
+					__here__;
+				}
+			}
+
+			__here__;
+
+			if(p_scene->low_power == EPDK_TRUE)
+			{
+				other_dlg_exist = EPDK_TRUE;
+				__here__;
+				p_scene->low_power = EPDK_FALSE;
+
+				if(GUI_IsTimerInstalled(msg->h_deswin, LOW_POWER_DIALOG_TIME_ID))
+				{
+					__here__;
+					GUI_KillTimer(msg->h_deswin, LOW_POWER_DIALOG_TIME_ID);
+					scene_on_dialog(msg);
+				}
+			}
+
+			//�������usbʱ����������ģʽ�������Ͷ����Ϣ�ķ�ʽ֪ͨusb���ӣ�
+			//����ر������Ի���󣬶Ի�����Ϣѭ��δ���������������
+			if(EPDK_TRUE == other_dlg_exist)
+			{
+				__gui_msg_t set_msg;
+				eLIBs_memcpy(&set_msg, msg, sizeof(__gui_msg_t));
+				GUI_SendNotifyMessage(&set_msg);
+			}
+			else
+			{
+				__here__;
+				init_usb_device_plugin_proc(msg);
+				__here__;
+				NOTIFY_MSG(DSK_MSG_ORCHID_UPDATE_START, NULL, msg->h_deswin, 0, 0);
+				__here__;
+			}
+
+			break;
+		}
+
+		case DSK_MSG_USBD_PLUG_OUT:				/* usb devcie plug out */
+		{
+			__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+			__here__;
+			init_usb_device_plugout_proc(msg);
+			__here__;
+			init_ctr->tp_msg_enble = EPDK_TRUE;
+			__here__;
+			//usb���Ӱγ��������õ͵��ѯ��ʱ������Ϊ���ܵ͵�
+			GUI_ResetTimer(msg->h_deswin, init_ctr->low_power_check_time_id, init_ctr->low_power_check_timeout, NULL);
+			__here__;
+			GUI_ResetTimer(msg->h_deswin, init_ctr->led_flash_time_id, init_ctr->led_flash_timeout, NULL);
+			//usb���Ӱγ��������Զ��ػ����Զ�������ʱ��
+			__wrn("init_ctr->closescn_timer_exist=%d\n", init_ctr->closescn_timer_exist);
+			__wrn("init_ctr->closescn_timeout=%d\n", init_ctr->closescn_timeout);
+			if(EPDK_TRUE == init_ctr->closescn_timer_exist)
+			{
+				if(GUI_IsTimerInstalled(msg->h_deswin, init_ctr->close_scn_time_id))
+				{
+					GUI_ResetTimer(msg->h_deswin, init_ctr->close_scn_time_id, init_ctr->closescn_timeout, NULL);
+				}
+				else
+				{
+					GUI_SetTimer(msg->h_deswin, init_ctr->close_scn_time_id, init_ctr->closescn_timeout, NULL);
+				}
+			}
+			//�͵���ʾ�򵯳������usb�����°γ���
+			//�ö�ʱ���ѱ�ɾ����������һ��
+			if(!GUI_IsTimerInstalled(msg->h_deswin, init_ctr->low_power_check_time_id))
+			{
+				GUI_SetTimer(msg->h_deswin, init_ctr->low_power_check_time_id, init_ctr->low_power_check_timeout, NULL);
+			}
+			__here__;
+			if(!GUI_IsTimerInstalled(msg->h_deswin, init_ctr->led_flash_time_id))
+			{
+				GUI_SetTimer(msg->h_deswin, init_ctr->led_flash_time_id, init_ctr->led_flash_timeout, NULL);
+			}
+			break;
+		}
+
+		case DSK_MSG_ORCHID_UPDATE_START:
+		{
+			__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+			activity_load_app("application://app_root");
+			break;
+		}
+		case DSK_MSG_ORCHID_UPDATE_END:
+		{
+			__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+			__here__
+			init_orchid_update_end(msg);
+			__here__
+
+			if(dsk_display_get_output_type() == DISP_OUTPUT_TYPE_LCD)
+			{
+				init_ctr->tp_msg_enble = EPDK_TRUE;
+			}
+
+			break;
+		}
+
+		case DSK_MSG_FS_PART_PLUGIN:
+		{
+			char diskname[4];
+			__gui_msg_t msgex;
+			__wrn("msg->dwAddData2=0x%X\n", msg->dwAddData2);
+			diskname[0] = (__u8)(msg->dwAddData2);
+			diskname[1] = '\0';
+			__msg("disk %s plug in\n", diskname);
+
+			if((diskname[0] == 'D') || (diskname[0] == 'E') || (diskname[0] == 'Z'))
+			{
+				return 0;
+			}
+			//notify top
+			msgex.id 			= DSK_MSG_FS_PART_PLUGIN;
+			msgex.h_srcwin 		= 0;
+			msgex.h_deswin 		= 0;
+			msgex.dwAddData1 	= msg->dwAddData1;
+			msgex.dwAddData2 	= msg->dwAddData2;
+			activity_notify_top(&msgex);
+			break;
+		}
+
+		case DSK_MSG_FS_PART_PLUGOUT:
+		{
+			char diskname[4];
+			__gui_msg_t msgex;
+			diskname[0] = msg->dwAddData2;
+			diskname[1] = '\0';
+			__msg("disk %s plug out\n", diskname);
+
+			if((diskname[0] == 'D') || (diskname[0] == 'E') || (diskname[0] == 'Z'))
+			{
+				return 0;
+			}
+
+			//notify top
+			msgex.id 			= DSK_MSG_FS_PART_PLUGOUT;
+			msgex.h_srcwin 		= 0;
+			msgex.h_deswin 		= 0;
+			msgex.dwAddData1 	= msg->dwAddData1;
+			msgex.dwAddData2 	= msg->dwAddData2;
+			activity_notify_top(&msgex);
+
+			if(dsk_wkm_is_open())
+			{
+				char filename[512];
+				dsk_wkm_get_now_playing_file(filename);
+				__msg("filename = %s\n", filename);
+
+				if(0 == eLIBs_strnicmp(filename, diskname, 1))
+				{
+					__here__
+					dsk_wkm_close();
+				}
+			}
+
+			break;
+		}
+
+		case DSK_MSG_TCON_RELEASE_LCMI :
+			__wrn("DSK_MSG_TCON_RELEASE_LCMI\n");
+			g_tconOccupyLcmi_flag = 0;
+
+		case DSK_MSG_SCREEN_OPEN:				/* ���� */
+			init_open_screen(msg);
+			{
+				__gui_msg_t msgex;
+				msgex.id				= DSK_MSG_SCREEN_OPEN;
+				msgex.h_srcwin		= 0;
+				msgex.h_deswin		= 0;
+				msgex.dwAddData1	= msg->dwAddData1;
+				msgex.dwAddData2	= msg->dwAddData2;
+				activity_notify_top(&msgex);
+			}
+			break;
+
+		case DSK_MSG_LOW_POWER:				/* low power */
+		{
+			__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+			
+			if(init_ctr->power_off)
+			{
+				break;
+			}
+
+			init_ctr->power_off = 1;
+			init_restart_close_scn(msg);
+			init_low_power_proc(msg);
+			//init_power_off_proc(msg);
+			init_ctr->power_off = 0;
+			g_b_lowpower++;
+			//IOCTRL__ATV_PW__SET_OFF();
+			break;
+		}
+
+		case DSK_MSG_ENABLE_STANDBY:
+			init_lock(msg);
+			g_b_enable_standby = 1;
+			init_unlock(msg);
+			break;
+
+		case DSK_MSG_DISABLE_STANDBY:
+			init_lock(msg);
+			g_b_enable_standby = 0;
+			init_unlock(msg);
+			break;
+
+		case DSK_MSG_GET_STANDBY_FLAG:
+		{
+			__bool flag;
+			init_lock(msg);
+			flag = g_b_enable_standby;
+			init_unlock(msg);
+			return flag;
+		}
+		case DSK_MSG_POWER_OFF: 			/* power off */
+		{
+			init_scene_t *p_scene;
+			__init_ctl_t *init_ctr;
+			__here__;
+			if(GUI_IsTimerInstalled(msg->h_deswin, ID_TIMER_LOAD_APP))
+			{
+				GUI_KillTimer(msg->h_deswin, ID_TIMER_LOAD_APP);
+			}
+			__here__;
+			p_scene = (init_scene_t *)GUI_WinGetAddData(msg->h_deswin);
+			init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+
+			if(p_scene->usb_plug_in)//���usb���ӵ��У���ô���ػ�
+			{
+				break;
+			}
+
+			__wrn("init_ctr->power_off=%d\n", init_ctr->power_off);
+
+			if(init_ctr->power_off)
+			{
+				break;
+			}
+			if(msg->dwAddData2 == KEY_UP_ACTION/*  && dsk_get_charge_state()==EPDK_FALSE*/)//add by Kingvan
+			{
+				init_ctr->power_off = EPDK_TRUE;
+				//������ʱ��ʼ
+				init_restart_close_scn(msg);
+				__wrn("");
+				init_power_off_proc(msg);
+				__wrn("");
+			}
+
+			break;
+		}
+		case DSK_MSG_STANDBY_WAKE_UP:
+			__here__
+			init_open_screen(msg);
+			break;
+
+		case DSK_MSG_TVDAC_PLUGOUT:
+		case DSK_MSG_HDMI_PLUGOUT:
+		{
+			//����
+			if(dsk_display_get_output_type() != DISP_OUTPUT_TYPE_LCD)
+			{
+				__gui_msg_t msgex;
+				__here__;
+				//notify top
+				msgex.id 			= msg->id;
+				msgex.h_srcwin 		= 0;
+				msgex.h_deswin 		= 0;
+				msgex.dwAddData1 	= msg->dwAddData1;
+				msgex.dwAddData2 	= msg->dwAddData2;
+				activity_notify_top(&msgex);
+			}
+
+			__here__;
+			break;
+		}
+
+		case DSK_MSG_SCREEN_SWITCH:
+		{
+			__init_ctl_t *init_ctr;
+			init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+
+			if(msg->dwAddData1 == LION_DISP_LCD)		// �л���LCD���򿪴�������Ϣ
+			{
+				init_lock(msg);
+				init_ctr->tp_msg_enble = EPDK_TRUE;
+				init_unlock(msg);
+			}
+			else											// �л���tv , �رմ�������Ϣ
+			{
+				init_lock(msg);
+				init_ctr->tp_msg_enble = EPDK_FALSE;
+				init_unlock(msg);
+			}
+
+			//���´�������
+			init_scene_destroy(msg);
+			init_scene_create(msg);
+			break;
+		}
+
+		case DSK_MSG_ASSISTANT_SCENE_CREATE:
+		{
+			break;
+		}
+
+		case DSK_MSG_ASSISTANT_SCENE_DELETE:
+		{
+			break;
+		}
+
+		case DSK_MSG_SET_SCN_CLOSE:
+			init_set_close_scn(msg);
+			break;
+
+		case DSK_MSG_SCREEN_CLOSE:
+		{
+			__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+
+			if(init_ctr->closescn_gate_on == EPDK_TRUE)
+			{
+				init_close_screen(msg, 0);
+				{
+					__gui_msg_t msgex;
+					msgex.id				= DSK_MSG_SCREEN_CLOSE;
+					msgex.h_srcwin		= 0;
+					msgex.h_deswin		= 0;
+					msgex.dwAddData1	= msg->dwAddData1;
+					msgex.dwAddData2	= msg->dwAddData2;
+					activity_notify_top(&msgex);
+				}
+			}
+			break;
+		}
+		case DSK_MSG_RELEASE_LOGO_BUF :
+			LogoBufRelease();
+			break;
+		case DSK_MSG_SCREENOFF_BKOFF :
+			g_screenCloseSel = OP_SCREENOFF_AND_BKOFF;
+			return EPDK_OK;
+
+		case DSK_MSG_SCREENON_BUT_BKOFF :
+			g_screenCloseSel = OP_SCREENON_BUT_BKOFF;
+			return EPDK_OK;
+
+		case DSK_MSG_TCON_CLOSE_SCREEN :
+			g_tconOccupyLcmi_flag = -1;
+			return EPDK_OK;
+
+		case DSK_MSG_TCON_OCCUPY_LCMI :
+		{
+			g_tconOccupyLcmi_flag = 1;
+			g_screenCloseSel = OP_SCREENOFF_BUT_BKON;
+			break;
+		}
+		case DSK_MSG_SCREEN_FORCE_CLOSE:
+		{
+			__wrn("Tarring-----Force close---------\n");
+			init_close_screen(msg, 1);
+			{
+				__gui_msg_t msgex;
+				msgex.id			= DSK_MSG_SCREEN_FORCE_CLOSE;
+				msgex.h_srcwin		= 0;
+				msgex.h_deswin		= 0;
+				msgex.dwAddData1	= msg->dwAddData1;
+				msgex.dwAddData2	= msg->dwAddData2;
+				activity_notify_top(&msgex);
+			}
+			break;
+		}
+
+		case DSK_MSG_CLOSE_SCN_GATE_OFF:
+		{
+			__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+			init_ctr->closescn_gate_on = EPDK_FALSE;
+			break;
+		}
+
+		case DSK_MSG_CLOSE_SCN_GATE_ON:
+		{
+			__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+			init_ctr->closescn_gate_on = EPDK_TRUE;
+			break;
+		}
+
+		case DSK_MSG_HOME:
+		{
+			__gui_msg_t msgex;
+			__here__;
+			//notify top
+			eLIBs_memcpy(&msgex, msg, sizeof(__gui_msg_t));
+			activity_notify_top(&msgex);
+			break;
+		}
+
+		case DSK_MSG_ALARM:
+		{
+			__gui_msg_t msgex;
+			init_open_screen(msg);
+			//notify top
+			msgex.id 			= msg->id;
+			msgex.h_srcwin 		= 0;
+			msgex.h_deswin 		= 0;
+			msgex.dwAddData1 	= msg->dwAddData1;
+			msgex.dwAddData2 	= msg->dwAddData2;
+			activity_notify_top(&msgex);
+			break;
+		}
+
+		case DSK_MSG_SET_AUTO_OFF:
+		{
+			init_set_auto_off(msg);
+			break;
+		}
+
+		case DSK_MSG_FW_UPDATE:
+		{
+			__here__;
+			/* delay */
+			esKRNL_TimeDly(200);
+			/* ִ���������� */
+			dsk_fw_update();
+			__here__;
+			esKRNL_TimeDly(200);
+			__here__;
+			break;
+		}
+		case DSK_MSG_WIFI_PART_PLUGIN:
+		{
+			
+			__gui_msg_t msgex;					
+			msgex.id 			= DSK_MSG_WIFI_PART_PLUGIN;
+			msgex.h_srcwin 		= 0;
+			msgex.h_deswin 		= 0;
+			msgex.dwAddData1 	= msg->dwAddData1;
+			msgex.dwAddData2 	= msg->dwAddData2;
+			activity_notify_top(&msgex);
+			
+			break;
+		}
+		case DSK_MSG_WIFI_PART_PLUGOUT:
+		{
+			
+			__gui_msg_t msgex;			
+			msgex.id 			= DSK_MSG_WIFI_PART_PLUGOUT;
+			msgex.h_srcwin 		= 0;
+			msgex.h_deswin 		= 0;
+			msgex.dwAddData1 	= msg->dwAddData1;
+			msgex.dwAddData2 	= msg->dwAddData2;
+			activity_notify_top(&msgex);
+			
+			break;
+		}
+		case DSK_MSG_WIFI_PART_LINKING:
+		{
+			
+			__gui_msg_t msgex;				
+			msgex.id 			= DSK_MSG_WIFI_PART_LINKING;
+			msgex.h_srcwin 		= 0;
+			msgex.h_deswin 		= 0;
+			msgex.dwAddData1 	= msg->dwAddData1;
+			msgex.dwAddData2 	= msg->dwAddData2;
+			activity_notify_top(&msgex);
+			break;
+		}
+		case DSK_MSG_WIFI_PART_UNLINKING:
+		{		
+			__gui_msg_t msgex;					
+			msgex.id 			= DSK_MSG_WIFI_PART_UNLINKING;
+			msgex.h_srcwin 		= 0;
+			msgex.h_deswin 		= 0;
+			msgex.dwAddData1 	= msg->dwAddData1;
+			msgex.dwAddData2 	= msg->dwAddData2;
+			activity_notify_top(&msgex);
+			
+			break;
+		}
+		case DSK_MSG_FW_START_UPDATE: 
+		{
+			init_scene_t *p_scene;		
+			__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(msg->h_deswin);
+			p_scene = (init_scene_t *)GUI_WinGetAddData(msg->h_deswin);
+			if(GUI_IsTimerInstalled(msg->h_deswin, init_ctr->low_power_check_time_id))
+			{
+				GUI_KillTimer(msg->h_deswin, init_ctr->low_power_check_time_id);
+			}
+
+			if(GUI_IsTimerInstalled(msg->h_deswin, init_ctr->cursor_time_id))
+			{
+				GUI_KillTimer(msg->h_deswin, init_ctr->cursor_time_id);
+			}
+
+			if(GUI_IsTimerInstalled(msg->h_deswin, init_ctr->close_scn_time_id))
+			{
+				GUI_KillTimer(msg->h_deswin, init_ctr->close_scn_time_id);
+			}
+			if(GUI_IsTimerInstalled(msg->h_deswin, init_ctr->auto_off_time_id))
+			{
+				GUI_KillTimer(msg->h_deswin, init_ctr->auto_off_time_id);
+			}
+			if(GUI_IsTimerInstalled(msg->h_deswin, init_ctr->led_flash_time_id))
+			{
+				GUI_KillTimer(msg->h_deswin, init_ctr->led_flash_time_id);
+			}
+			__here__;
+			activity_finish_all();
+			__here__;
+			gscene_bgd_set_flag(EPDK_TRUE);
+			__here__;
+			gscene_bgd_refresh();
+			__here__;
+			gscene_hbar_set_state(HBAR_ST_HIDE);					
+			fw_update(p_scene->dialog_layer, (char *)(msg->dwAddData1));
+			__here__;
+			break;
+		}	
+		case DSK_MSG_MIC_PLUGIN:
+		case DSK_MSG_MIC_PLUGOUT:
+		case DSK_MSG_AUX_PLUGIN:
+		case DSK_MSG_AUX_PLUGOUT:
+		{
+			__gui_msg_t msgex;	
+			msgex.id 			= msg->id;
+			msgex.h_srcwin 		= 0;
+			msgex.h_deswin 		= 0;
+			msgex.dwAddData1 	= msg->dwAddData1;
+			msgex.dwAddData2 	= msg->dwAddData2;
+			activity_notify_top(&msgex);
+		}
+		
+		default:
+			GUI_ManWinDefaultProc(msg);
+			break;
+	}
+
+	return EPDK_OK;
+}
+
+H_WIN init_mainwin_create(void)
+{
+	H_WIN  						hManWin;
+	__gui_manwincreate_para_t  	create_info;
+	eLIBs_memset(&create_info, 0, sizeof(__gui_manwincreate_para_t));
+	create_info.attr            = NULL;
+	create_info.hParent			= NULL;
+	create_info.hHosting 		= NULL;
+	create_info.ManWindowProc   = init_mainwin_cb;
+	create_info.name            = "init";
+	hManWin 					= GUI_ManWinCreate(&create_info);
+
+	if(hManWin == NULL)
+	{
+		__wrn("init: create main windows failed!\n");
+		return NULL;
+	}
+
+	return hManWin;
+}
+

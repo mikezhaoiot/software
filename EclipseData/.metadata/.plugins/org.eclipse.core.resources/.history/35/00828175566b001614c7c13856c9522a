@@ -1,0 +1,54 @@
+/*
+**************************************************************************************************************
+*											         ePDK
+*						            the Easy Portable/Player Develop Kits
+*									           desktop system
+*
+*						        	 (c) Copyright 2007-2010, ANDY, China
+*											 All Rights Reserved
+*
+* File    	: spsc_ui.h
+* By      	: Bayden.chen
+* Func		:
+* Version	: v1.0
+* ============================================================================================================
+* Bayden.chen  create this file
+**************************************************************************************************************
+*/
+
+#ifndef __KARAOK_MAN_UI_H__
+#define __KARAOK_MAN_UI_H__
+
+#include "beetles_app.h"
+
+typedef struct
+{
+	__s32 x;
+	__s32 y;
+	__s32 w;
+	__s32 h;
+	__s32 res_id;
+	HTHEME res_hd;
+
+} karaok_man_rect_t;
+typedef enum
+{
+
+
+
+
+
+
+
+}
+typedef struct
+{
+	__s32				 pipe;
+	karaok_man_rect_t	 man_scene_lyr;
+	karaok_man_rect_t	 uipara_show_lyr;
+	karaok_man_rect_t	 uipara_icon[];
+} karaok_man_uipara_t;
+
+karaok_man_uipara_t *karaok_man_get_uipara(__s32 rotate);
+
+#endif

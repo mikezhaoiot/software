@@ -1,0 +1,77 @@
+/*
+**************************************************************************************************************
+*											         ePDK
+*						            the Easy Portable/Player Develop Kits
+*									           desktop system
+*
+*						        	 (c) Copyright 2007-2010, ANDY, China
+*											 All Rights Reserved
+*
+* File    	: spsc_man.h
+* By      	: Bayden.chen
+* Func		:
+* Version	: v1.0
+* ============================================================================================================
+* v  create this file
+**************************************************************************************************************
+*/
+
+#ifndef __MOVIE_SPSC_H__
+#define  __MOVIE_SPSC_H__
+
+#include "beetles_app.h"
+#include "spsc_ui.h"
+
+typedef enum
+{
+  spsc_scene_msg_timeout = 0,
+  spsc_scene_msg_brightset,
+  spsc_scene_msg_volumeset,
+  spsc_scene_msg_tvout,
+  spsc_scene_msg_rr,	
+  spsc_scene_msg_save_breakpoint_info,
+  movie_scene_msg_timeout,
+  movie_scene_msg_exit,  
+  spsc_scene_msg_num
+} movie_spsc_scene_msg_t;
+
+typedef enum
+{
+  movie_spsc_scene_update_fileinfo = GUI_MSG_ + 1
+
+} movie_spsc_scene_recv_msg_t;
+
+
+typedef struct
+{
+	H_WIN hparent;
+	__s32 scene_id;
+} movie_spsc_create_para_t;
+
+typedef enum
+{
+  movie_spsc_ctrl_scene_id = 1231,
+  movie_spsc_prog_scene_id,
+  movie_spsc_scene_id_max
+} movie_spsc_scene_id_t;
+
+typedef struct
+{
+	H_WIN hparent;
+	H_WIN spsc_manager;
+	H_LYR hlyr;
+	void *spsc_timeset_scene;
+	void *spsc_prog_scene;
+	__bool btime_set_mode;
+	__u8  spsc_hide_timmer_id;
+	__s32 scene_id;
+}movie_spsc_scene_t;
+
+void *spsc_man_scene_create(movie_spsc_create_para_t *create_para);
+static __s32 spsc_man_scene_proc(__gui_msg_t *msg);
+static __s32 __spsc_prog_scene_create(movie_spsc_scene_t *scene_para);
+
+
+__s32 movie_spsc_scene_delete(void *handle);
+
+#endif

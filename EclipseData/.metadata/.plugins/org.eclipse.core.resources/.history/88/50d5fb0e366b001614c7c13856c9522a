@@ -1,0 +1,113 @@
+/*
+**************************************************************************************************************
+*											         ePDK
+*						            the Easy Portable/Player Develop Kits
+*									           desktop system 
+*
+*						        	 (c) Copyright 2007-2010, ANDY, China
+*											 All Rights Reserved
+*
+* File    	:app_karaok.h
+* By      	: Bayden.chen
+* Func		: 
+* Version	: v1.0
+* ============================================================================================================
+* 2011-05-05   Bayden.chen  create this file, implements the fundemental interface;
+**************************************************************************************************************
+*/
+#ifndef __APP_KARAOK_H__
+#define __APP_KARAOK_H__
+
+
+
+typedef struct
+{
+	void* playsta_scene;
+	void* sub_show_scene;
+	void* man_scene;
+	__u32 sub_state;    
+    __u32 sub_pos;
+    __u32 sub_color;
+    __u32 sub_size;
+    __u32 sub_stream;
+	__u32 root_type;  
+	H_WIN h_deswin;	
+	
+    void* sub_set_scene;
+    H_WIN breakplay_scene;
+    H_WIN playerror_scene;
+    H_WIN playend_scene;       
+	H_WIN karaok_manager;
+	H_WIN prog_scene;
+	ES_FILE* hdisp;   
+	__hdle	 hvedio_lyr;
+
+	__u8 auto_play_timmer_id;
+	__u8 auto_save_bp_timer_id;	
+	__u8 mic_check_timer_id;
+	__u8 track_mode;
+	__bool exit_karaok;
+	__bool start_flag;
+	__s32 err_cnt;
+	__s32 rr_flag;
+    __s32 cur_time;
+    char  cur_playing_file[RAT_MAX_FULL_PATH_LEN+1];
+    __s32 stop_cnt ;			
+	__s32 cur_stop_cnt;
+	__s32 Digit_Num; 			
+	__u8  Digit_TimerId;  
+	
+	H_LYR  Digit_Layer; 
+	__bool karaok_scence_exsit;
+}karaok_ctrl_t;
+
+
+H_WIN app_karaok_create(root_para_t *para);
+static __s32 app_karaok_proc(__gui_msg_t* msg);
+static __s32 karaok_manager_scene_create(karaok_ctrl_t *karaok_ctrl);
+static __s32 karaok_ctrl_para_init(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_ctrl_para_deinit(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_install_autoplay_timmer(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_reset_autoplay_timmer(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_uninstall_autoplay_timmer(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_load_breakpoint_info(__s32 index, __cedar_tag_inf_t* tag_inf);
+static __s32 karaok_make_tag(karaok_ctrl_t* karaok_ctrl, __cedar_tag_inf_t* tag_inf);
+static __s32 karaok_save_breakpoint_info(karaok_ctrl_t* karaok_ctrl, __s32 index);
+static __s32 karaok_delete_breakpoint_info(karaok_ctrl_t* karaok_ctrl, __s32 index);
+static __s32 karaok_cur_file_has_breakpoint(void);
+static __s32 kraarok_change_track(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_play_file(karaok_ctrl_t* karaok_ctrl, __s32 index, __bool breakplay);
+static __s32 karaok_play_next(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_play_prev(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_start_play(karaok_ctrl_t* karaok_ctrl, __bool breakplay);
+static __s32 karaok_auto_play_next(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_exit(karaok_ctrl_t* karaok_ctrl, __s32 flag);
+static __s32 karaok_check_play_err(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_check_auto_play(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_subshow_scene_create(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_subshow_scene_delete(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_breakplay_scene_create(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_breakplay_scene_delete(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_playerror_scene_create(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_playerror_scene_delete(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_playend_scene_create(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_playend_scene_delete(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_has_subscene(karaok_ctrl_t* karaok_ctrl, __u32 sub_id);
+static __s32 karaok_delete_subscene_by_id(karaok_ctrl_t* karaok_ctrl, __u32 sub_id);
+static __s32 karaok_after_start_play(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_breakplay_scene_cmd(karaok_ctrl_t* karaok_ctrl, __s32 id, __s32 dw2);
+static __s32 kararok_man_scene_cmd(karaok_ctrl_t* karaok_ctrl, __s32 id,__s32 dw2);
+static __s32 karaok_save_last_playfile(__gui_msg_t* msg);
+static __s32 karaok_save_last_playfile_auto(karaok_ctrl_t *karaok_ctrl);
+static void  karaok_set_play_mode(void);
+static void  karaok_set_zoom_mode(void);
+static __u32 karaok_get_sub_state(void);
+static __u32 karaok_get_sub_stream_index(void);
+static __u32 karaok_get_sub_show_pos(void);
+static __u32 karaok_get_sub_show_color(void);
+static __s32 karaok_reg_para_init(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_play_by_index(karaok_ctrl_t* karaok_ctrl, __u32 karaok_index) ;
+static void  karaok_auto_save_breakpoint(karaok_ctrl_t* karaok_ctrl);
+static __s32 karaok_key(__gui_msg_t *msg);
+
+#endif

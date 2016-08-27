@@ -1,0 +1,317 @@
+/*
+**************************************************************************************************************
+*											         ePDK
+*						            the Easy Portable/Player Develop Kits
+*									           desktop system
+*
+*						        	 (c) Copyright 2007-2010, ANDY, China
+*											 All Rights Reserved
+*
+* File    		: init.c
+* By      		: Andy.zhang
+* Func		: init thread
+* Version	: v1.0
+* ============================================================================================================
+* 2009-7-20 8:51:52  andy.zhang  create this file, implements the fundemental interface;
+**************************************************************************************************************
+*/
+
+#include "mod_init_i.h"
+#include "ui\\init_server.h"
+#include "ui\\tp_adjust_scene\\scene_adjust.h"
+#include "bmp_parser\\Parse_Picture.h"
+
+#define XML_PATH		BEETLES_APP_ROOT"apps\\desktop"
+static H_WIN init_mainwin;
+extern __s8 g_tconOccupyLcmi_flag;
+
+void application_init_process(void *arg)
+{
+	__gui_msg_t msg;
+	__s32 ret = EPDK_FAIL;
+	__memit_hook_t 	emit_hook;		
+	SIZE screen_size;
+	ES_FILE *hAudio;	
+	ES_FILE *pHwsc;
+	dsk_amplifier_onoff(BEETLES_SPEAK_OFF);
+	esDEV_Plugin("\\drv\\ir.drv", 0, 0, 1);
+	esDEV_Plugin("\\drv\\audio.drv", 0, 0, 1);		
+	hAudio = eLIBs_fopen("b:\\AUDIO\\PLAY", "r+");
+	if(NULL != hAudio)
+	{
+		eLIBs_fioctrl(hAudio, AUDIO_DEV_CMD_RESIZE_BUF, 1024 * 100, 0);
+		eLIBs_fclose(hAudio);
+		hAudio = NULL;
+	}
+	init_reg_param_load();
+
+	/* messge server init*/
+	msg_emit_init();
+	emit_hook.key_hook 			= key_hook_cb;
+	emit_hook.tp_hook 	   		= tp_hook_cb;
+	emit_hook.init_hook 		= init_hook_cb;
+	msg_emit_register_hook(&emit_hook);	
+	live_init();
+	dsk_display_get_size(&screen_size.width,&screen_size.height);
+	gscene_bgd_init(&screen_size, BGD_STATUS_HIDE, FB_TYPE_RGB); 	
+	dsk_net_init();		
+	/*enable device monitor */
+	pHwsc = eLIBs_fopen("b:\\HWSC\\hwsc", "rb+");
+	if(pHwsc)
+	{
+		eLIBs_fioctrl(pHwsc, DEV_IOC_USR_HWSC_ENABLE_MONITOR, 0, NULL);
+		eLIBs_fclose(pHwsc);
+	}
+	else
+	{
+		__wrn("try to open b:\\HWSC\\hwsc failed!\n");
+	}
+	
+	//esKRNL_TimeDly(50);
+	init_mainwin = init_mainwin_create();
+	GUI_SetActiveManWin(init_mainwin);
+	/* set message loop win */
+	message_loop_win_set_default(init_mainwin);
+	_framework_init();	
+	/* message loop*/
+	while(GUI_GetMessageEx(&msg, init_mainwin))	// ��Ϣѭ��
+	{
+		ret = GUI_DispatchMessage(&msg);		// �ַ���Ϣ���ص�	
+		if(msg.p_arg)							// ͬ����Ϣ��Ӧ
+		{
+			GUI_SetSyncMsgRetVal(&msg, ret);
+			GUI_PostSyncSem(&msg);
+		}
+	}
+	GUI_WinThreadCleanup(init_mainwin);
+	message_loop_win_set_default(NULL);
+	dsk_amplifier_onoff(BEETLES_SPEAK_OFF);	
+	_process_exit();		
+	/*
+	*	����mcu�ţ�ʹ�õ͵�ػ���ʹ��������Ҳ��������ʹ�ܵ�Դ��
+	*/
+	mcu_set_gpio_val(MCU_IO_PA6, 0);	
+	while(1)
+	{
+		esKRNL_TimeDly(120);
+	}
+	esKSRV_PowerOff();
+}
+static void init_reg_param_load(void)
+{
+	reg_system_para_t *para;	
+	reg_wifi_para_t   *wifi_para;
+	__s32 ret;
+	__date_t date;
+	if(EPDK_FAIL ==  dsk_reg_init_para())
+	{
+		__msg("dsk_reg_init_para fail...\n");
+	}
+	
+	wifi_para = (reg_wifi_para_t *)dsk_reg_get_para_by_app(REG_APP_WIFI);
+	__msg("regCnt=%d\n", para->regCnt);
+	/*if(wifi_para->regCnt <= 0)
+	{
+		eLIBs_strcpy(wifi_para->sWifiListReg[0].ap_name, "WISESUN");
+		eLIBs_strcpy(wifi_para->sWifiListReg[0].ap_psk, "wisesun201209");
+		wifi_para->regCnt = 1;
+	}*/	
+	para = (reg_system_para_t *)dsk_reg_get_para_by_app(REG_APP_SYSTEM);
+	if(!para)
+	{
+		__wrn("init get reg para fail............\n");
+	}
+	else
+	{		
+		ret = esTIME_GetDate(&date);	
+		if(EPDK_OK == ret)
+		{
+			if(date.year < 2010 ||date.year > 2020)
+			{
+				__wrn("date.year < 2010 || date.year > 2020, reset system time...\n");
+				para->time_set = 1;
+			}
+		}			
+		if(1 == para->time_set)
+		{
+			para->time_set = 0;
+		}
+	}
+}
+
+__s32 key_hook_cb(__gui_msg_t *msg)
+{
+	if(init_mainwin)
+	{
+		__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(init_mainwin);
+		init_lock(msg);
+		if(!init_ctr->key_msg_enble)				
+		{
+			init_unlock(msg);
+			return -1;
+		}
+		if((msg->dwAddData1 != GUI_MSG_KEY_LOCKSCREEN) &&(msg->dwAddData1 != GUI_MSG_KEY_LONGLOCKSCREEN))
+		{
+			if(g_tconOccupyLcmi_flag == -1)
+			{
+				init_unlock(msg);
+				if(KEY_UP_ACTION == msg->dwAddData2)
+				{
+					__here__;
+					g_tconOccupyLcmi_flag = 1;
+					NOTIFY_MSG(DSK_MSG_SCREEN_OPEN, NULL, msg->h_deswin, 0, 0);
+				}
+				return 0;
+			}
+			else if(g_tconOccupyLcmi_flag == 0)
+			{
+				if(init_ctr->screen_close_done) // �Ѿ�����
+				{
+					init_unlock(msg);
+					if(/*GUI_MSG_KEY_ENTER == msg->dwAddData1 && */KEY_UP_ACTION == msg->dwAddData2)
+					{
+						__here__;
+						NOTIFY_MSG(DSK_MSG_SCREEN_OPEN, NULL, msg->h_deswin, 0, 0);
+					}
+					return 0;
+				}
+				if(init_ctr->screen_close_done)
+				{
+					init_unlock(msg);
+					return -1;
+				}
+			}
+		}
+		init_unlock(msg);
+		esPWM_UsrEventNotify();
+	}
+	GUI_PostMessage(msg);
+	//����enter��down��up��ͬʱ���������Ϣ��ʧ��֮���һ����ʱ
+	if(GUI_MSG_KEY_ENTER == msg->dwAddData1 && KEY_DOWN_ACTION == msg->dwAddData2)
+	{
+		esKRNL_TimeDly(10);
+	}
+	return 0;
+}
+static __s32 tp_hook_cb(__gui_msg_t *msg)
+{
+	if(init_mainwin)
+	{
+		__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(init_mainwin);
+		init_lock(msg);		
+		if(!init_ctr->tp_msg_enble)		
+		{
+			init_unlock(msg);
+			return -1;
+		}
+
+		if(init_ctr->screen_close_done)
+		{
+			init_unlock(msg);
+			return -1;
+		}
+		init_unlock(msg);		
+		esPWM_UsrEventNotify();
+	}	
+	GUI_PostMessage(msg);
+	return 0;
+}
+
+static __s32 init_hook_cb(__gui_msg_t *msg)
+{
+	if(init_mainwin)
+	{
+		__init_ctl_t *init_ctr = (__init_ctl_t *)GUI_WinGetAttr(init_mainwin);
+		/* ������ */
+		if(init_ctr->screen_close_done)
+		{
+			NOTIFY_MSG(DSK_MSG_SCREEN_OPEN, NULL, msg->h_deswin, 0, 0);
+		}
+	}
+	__here__;
+	GUI_PostMessage(msg);
+	__here__;
+	return 0;
+}
+static void _process_init(void)
+{
+	/* framework init */
+	_framework_init();
+	/* load main*/
+	activity_load_app("application://app_root");
+}
+
+static void _process_exit(void)
+{
+	bookengine_close();
+	msg_emit_deinit();
+    __here__;
+	_framework_exit();
+    __here__;
+	esDEV_Plugout("\\drv\\touchpanel.drv", 0);
+	/* close device */
+	_close_audio_dev();
+    __here__;
+	_close_lcd(); 
+    __here__;
+}
+static void _framework_init(void)
+{
+	AppletInfoManager	*info_manager = NULL;
+	ActivityManager 	*activity_manager = NULL;
+	info_manager = applet_info_manager_create();
+	applet_info_manager_load_dir(info_manager, XML_PATH);
+	applet_info_manager_set_defualt(info_manager);
+	activity_manager = activity_manager_create();
+	activity_manager_set_default(activity_manager);
+}
+
+static void _framework_exit(void)
+{
+	AppletInfoManager 	*info_manager = applet_info_manager_get_default();
+	ActivityManager 	*activity_manager = activity_manager_get_default();
+	activity_manager_destroy(activity_manager);
+	applet_info_manager_destroy(info_manager);
+	applet_info_manager_set_defualt(NULL);
+	activity_manager_set_default(NULL);
+}
+
+static void _close_audio_dev(void)
+{
+	ES_FILE	  *p_dac;
+	p_dac = eLIBs_fopen("b:\\AUDIO\\CTRL", "r+");
+	if(!p_dac)
+	{
+		__err("open dac device fail!\n");
+	}
+	eLIBs_fioctrl(p_dac, AUDIO_DEV_CMD_CLOSE_DEV, AUDIO_DEV_PLAY, 0);
+	eLIBs_fclose(p_dac);
+}
+static void _close_lcd(void)
+{
+	ES_FILE *disp;
+	__u32 outputtype;
+	__u32 	arg[3];
+	disp = eLIBs_fopen("b:\\DISP\\DISPLAY", "r+");
+
+	if(!disp)
+	{
+		__wrn("open display fail\n");
+		return ;
+	}
+
+	outputtype = eLIBs_fioctrl(disp, DISP_CMD_GET_OUTPUT_TYPE, 0, (void *)arg);
+
+	if(outputtype == DISP_OUTPUT_TYPE_LCD)
+	{
+		arg[0] = 0;
+		arg[1] = 0;
+		arg[2] = 0;
+		eLIBs_fioctrl(disp, DISP_CMD_LCD_OFF, 0, (void *)arg);
+	}
+
+	eLIBs_fclose(disp);
+}
+
+
+		

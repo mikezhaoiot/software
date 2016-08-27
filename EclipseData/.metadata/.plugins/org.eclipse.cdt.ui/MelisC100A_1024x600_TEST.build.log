@@ -1,0 +1,6 @@
+12:31:44 **** Build of configuration Release for project MelisC100A_1024x600_TEST ****
+make all 
+make:  makefile:  line 5:  Error -- Expecting macro or rule defn, found neither
+
+12:31:44 Build Finished (took 180ms)
+

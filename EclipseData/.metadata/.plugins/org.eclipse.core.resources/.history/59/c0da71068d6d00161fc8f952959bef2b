@@ -1,0 +1,591 @@
+
+#include "music_player.h"
+
+
+
+u8 Music_Option = 0;	/*0 快捷键进入， 1 文件管理器进入*/	
+
+
+__s32 app_music_create(root_para_t  *para)
+{
+	H_WIN hwin;
+	__gui_manwincreate_para_t create_info;
+	music_ctrl_t *music_ctrl = NULL;
+	g_disable_standby();
+	if(MUSICPLAYER_NORMAL == para->data)
+	{
+		gscene_hbar_set_text(HB_APP_MUISE);
+		gscene_bgd_set_default_bg_index(m_eBgdIdx_music);
+		gscene_hbar_set_state(HBAR_ST_SHOW);
+		gscene_bgd_set_state(BGD_STATUS_SHOW);
+	}
+	music_ctrl = (music_ctrl_t *)esMEMS_Balloc(sizeof(music_ctrl_t));
+	eLIBs_memset(music_ctrl, 0, sizeof(music_ctrl_t));
+	eLIBs_memset(&create_info, 0, sizeof(__gui_manwincreate_para_t));
+	Music_Option 			  = para->Option;	
+	music_ctrl->Flush_TimerId = 0x57;
+	music_ctrl->font 		  = para->font;
+	music_ctrl->root_type 	  = para->root_type;
+	music_ctrl->mode 		  = para->data;
+	if(para->explorer_play_music != 0)
+	{
+		music_ctrl->explorer_play_music = para->explorer_play_music;
+		music_ctrl->music_file_name     = para->music_file_name;
+	}
+	create_info.name            = APP_MUSIC;
+	create_info.hParent         = para->h_parent;
+	create_info.ManWindowProc   = (__pGUI_WIN_CB)esKRNL_GetCallBack((__pCBK_t)music_manager_win_cb);
+	create_info.attr            = (void *)music_ctrl;														
+	create_info.id				= APP_MUSIC_ID;
+	create_info.hHosting        = NULL;
+	hwin = GUI_ManWinCreate(&create_info);
+	return hwin;
+}
+static __s32 music_manager_win_cb(__gui_msg_t *msg)
+{
+	switch(msg->id)
+	{
+		case GUI_MSG_CREATE:
+		{
+			music_scene_create(msg);
+			return EPDK_OK;
+		}
+		case GUI_MSG_CLOSE:	
+		{
+			GUI_ManWinDelete(msg->h_deswin);	
+			return EPDK_OK;
+		}
+		case GUI_MSG_DESTROY:
+		{
+			music_uninstall_auto_play_timmer(msg);			
+			Music_Destroy(msg);
+			return EPDK_OK;
+		}
+		case GUI_MSG_KEY:
+		{
+			app_music_on_key_proc(msg);
+			break;
+		}
+		case GUI_MSG_TOUCH:
+			break;
+		case GUI_MSG_COMMAND:
+		{
+			Music_Command(msg);
+			break;
+		}
+		case MSG_APP_BACK_HOME:
+		{
+			music_ctrl_t *music_ctrl;
+			music_ctrl = (music_ctrl_t *)GUI_WinGetAttr(msg->h_deswin);
+			NOTIFY_MSG(msg->id,NULL,music_ctrl->h_framewin,0,0,0);		
+			break;
+		}
+		case DSK_MSG_FS_PART_PLUGOUT:
+		{
+			char diskname[2] = {0};
+			music_ctrl_t *music_ctrl = NULL;
+			music_ctrl	 = (music_ctrl_t *)GUI_WinGetAttr(msg->h_deswin);
+			diskname[0] = (char)(msg->dwAddData2);
+			diskname[1] = 0;
+			if(0 == eLIBs_strnicmp(music_ctrl->root, diskname, 1))
+			{
+				if(MUSICPLAYER_BACKGROUND == music_ctrl->mode)
+				{
+					Music_NotifyMessage(msg->h_deswin, GUI_MSG_COMMAND, CLOSE_BG_MUSIC, music_ctrl->mode);
+				}
+				else
+				{
+					Music_NotifyMessage(msg->h_deswin, GUI_MSG_COMMAND, SWITCH_TO_MMENU, music_ctrl->mode);
+				}
+			}
+			return EPDK_OK;
+		}
+		case GUI_MSG_TIMER:
+		{
+			music_ctrl_t *music_ctrl;
+			music_ctrl = (music_ctrl_t *)GUI_WinGetAttr(msg->h_deswin);
+			if(!music_ctrl)
+			{
+				__wrn("--music_ctrl NULL--\n");
+				return EPDK_FAIL;
+			}
+			if(LOWORD(msg->dwAddData1) == music_ctrl->Flush_TimerId)
+			{
+				music_player_ctrl_t *music_player_ctrl;
+				music_player_ctrl = (music_player_ctrl_t *)GUI_WinGetAttr(music_ctrl->h_framewin);
+				GUI_ResetTimer(msg->h_deswin, music_ctrl->Flush_TimerId, MUSIC_AUTO_FLUSH_TIME, NULL);
+				return EPDK_OK;
+			}
+			break;
+		}
+		default:
+			break;
+	}
+	return GUI_ManWinDefaultProc(msg);
+}
+
+static __s32 music_scene_create(__gui_msg_t *msg)
+{
+	music_ctrl_t *music_ctrl;
+	music_player_ctrl_t player_para;
+	eLIBs_memset(&player_para, 0, sizeof(music_player_ctrl_t));
+	music_ctrl = (music_ctrl_t *)GUI_WinGetAttr(msg->h_deswin);
+	player_para.root_type  = music_ctrl->root_type;
+	Music_GetPath(music_ctrl->root_type, music_ctrl->root);
+	player_para.media_type = RAT_MEDIA_TYPE_AUDIO;
+	player_para.font       = SWFFont;
+	switch(music_ctrl->mode)
+	{
+		case MUSICPLAYER_NORMAL:
+			player_para.visiable = EPDK_TRUE;
+			break;
+
+		case MUSICPLAYER_BACKGROUND:
+			player_para.visiable = EPDK_FALSE;
+			break;
+
+		default:
+			player_para.visiable = EPDK_TRUE;
+			break;
+	}	
+	if(EPDK_FAIL == music_layer_create(music_ctrl))
+	{
+		__wrn("create layer for music player failed!");
+		return EPDK_FAIL;
+	}
+	GUI_LyrWinSetSta(music_ctrl->music_layer, GUI_LYRWIN_STA_ON);
+	RegisterSpectrumControl();
+	music_ctrl->h_spectrum_win = SPCTRM_SceneCreate((H_WIN)(msg->h_deswin), (H_WIN)(music_ctrl->music_layer));
+	if(music_ctrl->h_spectrum_win == NULL)
+	{
+		__wrn("--h_spectrum_win NULL--\n");	
+	}
+	player_para.music_layer = 	music_ctrl->music_layer;
+	player_para.explorer_play_music = music_ctrl->explorer_play_music;
+	player_para.music_file_name = music_ctrl->music_file_name;
+	music_ctrl->h_framewin = music_player_win_create(msg->h_deswin, &player_para);
+	if(MUSICPLAYER_NORMAL == music_ctrl->mode)
+	{
+		GUI_WinSetFocusChild(music_ctrl->h_framewin);		
+	}
+	if(player_para.visiable)
+	{
+		GUI_LyrWinSetSta(music_ctrl->music_layer, GUI_LYRWIN_STA_ON);
+	}
+	else
+	{
+		GUI_LyrWinSetSta(music_ctrl->music_layer, GUI_LYRWIN_STA_SLEEP);
+	}
+	music_install_auto_play_timmer(msg);
+	return EPDK_OK;
+}
+
+static __s32 music_scene_delete(__gui_msg_t *msg)
+{
+	music_ctrl_t	*This = NULL;
+	__s32 			screen_width;
+	__s32 			screen_height;
+	This = (music_ctrl_t *)GUI_WinGetAttr(msg->h_deswin);
+	if(This == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	if(This->music_layer == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	This->mode = MUSICPLAYER_BACKGROUND;
+	dsk_display_get_size(&screen_width, &screen_height);
+	GUI_ClearRect(0, 0, screen_width, screen_height);
+	MusicPlayer_DigitDelete(This->h_framewin);
+	GUI_LyrWinSetSta(This->music_layer, GUI_LYRWIN_STA_SLEEP);
+	return EPDK_OK;
+}
+static __s32 music_layer_create(music_ctrl_t *music_ctrl)
+{
+	if(music_ctrl->music_layer == NULL)
+	{
+		RECT LayerRect;
+		music_get_screen_rect(&LayerRect);
+		music_ctrl->music_layer = com_layer_create(&LayerRect, 1, PIXEL_COLOR_ARGB8888, GUI_LYRWIN_STA_SUSPEND, "APP_MUSIC");	
+		if(music_ctrl->music_layer == NULL)
+		{
+			__wrn("--music layer create error--\n");
+			return EPDK_FAIL;
+		}
+	}
+	else
+	{
+		__wrn("--music layer create error--\n");
+	}
+	return EPDK_OK;
+}
+static __s32 music_layer_delete(music_ctrl_t *music_ctrl)
+{
+	if(music_ctrl->music_layer != NULL)
+	{
+		com_layer_destroy(music_ctrl->music_layer);
+	}
+	return EPDK_OK;
+}
+
+__s32 Music_Destroy(__gui_msg_t *msg)
+{
+	music_ctrl_t	*music_ctrl = NULL;
+	music_ctrl	 = (music_ctrl_t *)GUI_WinGetAttr(msg->h_deswin);
+	g_enable_standby();
+	rat_set_no_serch_record_flag(0);
+	music_layer_delete(music_ctrl);
+	UnRegisterSpectrumControl();					
+	__here__;
+	if(music_ctrl->mode == MUSICPLAYER_NORMAL)
+	{
+		gscene_bgd_set_state(BGD_STATUS_HIDE);
+	}
+	esMEMS_Bfree(music_ctrl, sizeof(music_ctrl_t));
+	__here__;
+	return EPDK_OK;
+}
+
+
+__s32 app_music_on_key_proc(__gui_msg_t *msg)
+{
+	if((KEY_DOWN_ACTION == msg->dwAddData2) || (KEY_REPEAT_ACTION == msg->dwAddData2))
+	{
+		switch(msg->dwAddData1)
+		{
+			case GUI_MSG_KEY_RIGHT:
+			case GUI_MSG_KEY_LONGRIGHT:
+			case GUI_MSG_KEY_UP:
+			case GUI_MSG_KEY_LONGUP:
+				break;
+
+			case GUI_MSG_KEY_LEFT:
+			case GUI_MSG_KEY_LONGLEFT:
+			case GUI_MSG_KEY_DOWN:
+			case GUI_MSG_KEY_LONGDOWN:
+				break;
+
+			case GUI_MSG_KEY_VDEC:
+				break;
+
+			case GUI_MSG_KEY_ENTER:
+			case GUI_MSG_KEY_MENU:
+				break;
+
+			case GUI_MSG_KEY_ESCAPE:
+				break;
+
+			case GUI_MSG_KEY_RISE:
+				break;
+
+			default:
+				break;
+		}
+	}
+	return EPDK_OK;
+}
+
+
+static __s32 Music_Command(__gui_msg_t *msg)
+{
+	music_ctrl_t *music_ctrl;
+	music_ctrl = (music_ctrl_t *)GUI_WinGetAttr(msg->h_deswin);
+	
+	switch(msg->dwAddData1)
+	{
+		case MUSICPLAYER_BACKGROUND:
+		{
+			music_scene_delete(msg);
+			break;
+		}
+	}
+	return EPDK_OK;
+}
+static __s32 Music_NotifyMessage(H_WIN hwin, __s32 id, __s32 data1, __s32 data2)
+{
+	__gui_msg_t msg;
+	H_WIN hDstWin;
+	hDstWin = GUI_WinGetParent(hwin);
+	msg.h_deswin = hDstWin;
+	msg.h_srcwin = hwin;
+	msg.id = GUI_MSG_COMMAND;
+	msg.dwAddData1 = MAKELONG(GUI_WinGetItemId(hwin), id);
+	msg.dwAddData2 = data1;
+	msg.dwReserved = data2;
+	GUI_SendNotifyMessage(&msg);
+	return EPDK_OK;
+}
+
+static __s32 music_install_auto_play_timmer(__gui_msg_t *msg)
+{
+	music_ctrl_t *music_ctrl;
+	music_ctrl = (music_ctrl_t *)GUI_WinGetAttr(msg->h_deswin);
+	if(!music_ctrl)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	if(!GUI_IsTimerInstalled(msg->h_deswin, music_ctrl->Flush_TimerId))
+	{
+		GUI_SetTimer(msg->h_deswin, music_ctrl->Flush_TimerId,MUSIC_AUTO_FLUSH_FIRST_TIME, NULL);
+	}
+	else
+	{
+		GUI_ResetTimer(msg->h_deswin, music_ctrl->Flush_TimerId,MUSIC_AUTO_FLUSH_FIRST_TIME, NULL);
+	}
+	return EPDK_OK;
+}
+
+static __s32 music_uninstall_auto_play_timmer(__gui_msg_t *msg)
+{
+	music_ctrl_t    *music_ctrl;
+	music_ctrl = (music_ctrl_t *)GUI_WinGetAttr(msg->h_deswin);
+	if(!music_ctrl)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	if(GUI_IsTimerInstalled(msg->h_deswin, music_ctrl->Flush_TimerId))
+	{
+		GUI_KillTimer(msg->h_deswin, music_ctrl->Flush_TimerId);
+	}
+	return EPDK_OK;
+}
+
+
+static __s32  Music_GetPath(__s32 root_type, char *path)
+{
+	__s32 ret = 0;
+	char str_root[50];
+	char disk_name[RAT_MAX_PARTITION][4];
+	eLIBs_memset(str_root, 0, sizeof(str_root));
+	eLIBs_memset(disk_name, 0, sizeof(disk_name));
+
+	switch(root_type)
+	{
+		case RAT_LOCAL:
+			eLIBs_strcpy(str_root, RAT_LOCAL_DISK);
+			break;
+
+		case RAT_TF:
+			eLIBs_strcpy(str_root, RAT_SD_CARD);
+			break;
+
+		case RAT_USB:
+			eLIBs_strcpy(str_root, RAT_USB_DISK);
+			break;
+
+		default:
+			break;
+	}
+
+	__msg("root_type=%d\n", root_type);
+	ret = rat_get_partition_name(str_root, disk_name);
+	eLIBs_strcpy(path, disk_name[0]);
+
+	if(path[0])
+	{
+		return EPDK_OK;
+	}
+	else
+	{
+		return EPDK_FAIL;
+	}
+}
+
+
+
+
+__s32 app_music_get_mode(H_WIN music_man_win)
+{
+	music_ctrl_t 			*music_ctrl = NULL;
+	musicplayer_mode_e   mode;
+	mode = -1;
+	if(music_man_win == NULL)
+	{
+		goto end;
+	}
+	music_ctrl = (music_ctrl_t *)GUI_WinGetAttr(music_man_win);
+
+	if(music_ctrl == NULL)
+	{
+		goto end;
+	}
+	mode = music_ctrl->mode;
+end:
+	;
+	return mode;
+}
+
+__s32 app_music_set_bg_mode(H_WIN music_man_win)
+{
+	__s32 ret;
+	music_ctrl_t 			*music_ctrl = NULL;
+	__gui_msg_t my_msg;
+	if(music_man_win == NULL)
+	{
+		goto fail;
+	}
+	music_ctrl = (music_ctrl_t *)GUI_WinGetAttr(music_man_win);
+
+	if(music_ctrl == NULL)
+	{
+		goto fail;
+	}
+
+	if(MUSICPLAYER_NORMAL != music_ctrl->mode)
+	{
+		__wrn("music is not in background mode...\n");
+		goto fail;
+	}
+
+	if(NULL == music_ctrl->h_framewin)
+	{
+		goto fail;
+	}
+
+	__wrn("music_ctrl->h_framewin=%x\n", music_ctrl->h_framewin);
+	ret = music_player_scene_delete(music_ctrl->h_framewin);
+
+	if(EPDK_FAIL == ret)
+	{
+		goto fail;
+	}
+
+	eLIBs_memset(&my_msg, 0, sizeof(__gui_msg_t));
+	my_msg.h_deswin = music_man_win;
+	ret = music_scene_delete(&my_msg);
+	__wrn("set music bg msg ok...\n");
+	return EPDK_OK;
+fail:
+	;
+	__wrn("set music bg msg fail...\n");
+	return EPDK_FAIL;
+}
+
+__s32 app_music_get_index(H_WIN music_man_win, __u32 *index)
+{
+	music_ctrl_t 			*music_ctrl = NULL;
+	music_player_ctrl_t	*music_player_ctrl = NULL;
+
+	if(music_man_win == NULL)
+	{
+		*index = 0;
+		return EPDK_FAIL;
+	}
+
+	music_ctrl = (music_ctrl_t *)GUI_WinGetAttr(music_man_win);
+
+	if(music_ctrl == NULL)
+	{
+		*index = 0;
+		return EPDK_FAIL;
+	}
+
+	music_player_ctrl = (music_player_ctrl_t *)GUI_WinGetAttr(music_ctrl->h_framewin);
+
+	if(music_player_ctrl == NULL)
+	{
+		*index = 0;
+		return EPDK_FAIL;
+	}
+
+	if(music_player_ctrl->list_ctrl != NULL)
+	{
+		*index = music_player_ctrl->list_ctrl->play_index;
+	}
+	else
+	{
+		*index = 0;
+	}
+
+	return music_ctrl->root_type;
+}
+
+__s32 app_music_restore(H_WIN music_man_win, root_para_t *root_para)
+{
+	__s32 ret = 0;
+	__u32 cur_time = 0;
+	music_ctrl_t *music_ctrl = NULL;
+	__s32 root_type = root_para->root_type;
+	char cur_file_name[RAT_MAX_FULL_PATH_LEN];
+
+	if(music_man_win == NULL)
+	{
+		__here__;
+		return EPDK_FAIL;
+	}
+	if(root_para->explorer_play_music != 0)			//从文件管理进来
+	{
+		eLIBs_memset(cur_file_name, 0, sizeof(cur_file_name));	//判断是否与当前播放文件相同，相同则恢复后台播放
+		robin_get_fsm_cur_file(cur_file_name, sizeof(cur_file_name));
+		ret = eLIBs_strcmp(cur_file_name, root_para->music_file_name);
+		if(ret != 0)
+		{
+			__here__;
+			return EPDK_FAIL;
+		}
+	}
+	music_ctrl = (music_ctrl_t *)GUI_WinGetAttr(music_man_win);
+	if(music_ctrl->root_type != root_type)
+	{
+		__here__;
+		return EPDK_FAIL;
+	}
+	music_ctrl->root_type = root_type;
+	music_ctrl->explorer_play_music = root_para->explorer_play_music;
+	music_ctrl->music_file_name = root_para->music_file_name;
+	{
+		music_player_ctrl_t *music_player_ctrl;
+		music_player_ctrl = (music_player_ctrl_t *)GUI_WinGetAttr(music_ctrl->h_framewin);
+
+		if(music_player_ctrl == NULL)
+		{
+			__here__;
+			return EPDK_FAIL;
+		}
+
+		music_player_ctrl->explorer_play_music = music_ctrl->explorer_play_music;
+		music_player_ctrl->music_file_name = music_ctrl->music_file_name;
+	}
+	GUI_WinSetFocusChild(music_man_win);
+
+	if(music_ctrl->mode == MUSICPLAYER_BACKGROUND)
+	{
+		music_ctrl->mode = 	MUSICPLAYER_NORMAL;
+	}
+	gscene_hbar_set_text(HB_APP_MUISE);
+	gscene_bgd_set_default_bg_index(m_eBgdIdx_music);
+	ret = GUI_LyrWinSetSta(music_ctrl->music_layer, GUI_LYRWIN_STA_ON);
+	ret = music_player_restore(music_ctrl->h_framewin, music_ctrl->root_type);
+	GUI_WinSetFocusChild(music_ctrl->h_framewin);		
+	gscene_hbar_set_state(HBAR_ST_SHOW);
+	return ret;
+}
+
+__s32 app_music_get_root_type(H_WIN music_man_win, __u32 *root_type)
+{
+	music_ctrl_t 			*music_ctrl = NULL;
+	music_player_ctrl_t	*music_player_ctrl = NULL;
+
+	if(music_man_win == NULL)
+	{
+		return EPDK_FAIL;
+	}
+
+	music_ctrl = (music_ctrl_t *)GUI_WinGetAttr(music_man_win);
+
+	if(music_ctrl == NULL)
+	{
+		return EPDK_FAIL;
+	}
+
+	if(root_type)
+	{
+		*root_type = music_ctrl->root_type;
+	}
+
+	return EPDK_OK;
+}
+

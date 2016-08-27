@@ -1,0 +1,117 @@
+
+#ifndef __KARAOK_PROG_H__
+#define __KARAOK_PROG_H__
+
+#include "beetles_app.h"
+#include "karaok_prog_ui.h"
+#include "karaok_man_ui.h"
+//#include "karaok_man.h"
+
+
+//����prog�ӳ�����ui����
+#define KARAOK_PROG_UI_TYPE_PROG		0x01
+#define KARAOK_PROG_UI_TYPE_CUR_TIME	0x02
+#define KARAOK_PROG_UI_TYPE_TOTAL_TIME	0x04
+#define KARAOK_PROG_UI_TYPE_ICON		0x08
+//prog������ui����
+#define KARAOK_PROG_UI_TYPE_ALL			(KARAOK_PROG_UI_TYPE_PROG | KARAOK_PROG_UI_TYPE_CUR_TIME | KARAOK_PROG_UI_TYPE_TOTAL_TIME |KARAOK_PROG_UI_TYPE_ICON)
+//����ͼ�����ʱ�����������ui����
+#define KARAOK_PROG_UI_TYPE_OTHER		(KARAOK_PROG_UI_TYPE_ALL&(~KARAOK_PROG_UI_TYPE_ICON))
+
+static __s32 last_point_x;
+static __u8  karaok_prog_need_jump = 0;
+//���������ڵ���Ϣ
+typedef enum
+{
+	karaok_prog_scene_msg_pre = 0,
+	karaok_prog_scene_msg_playpause,
+	karaok_prog_scene_msg_escape,
+	karaok_prog_scene_msg_next,
+	karaok_prog_scene_msg_track,
+	karaok_prog_scene_msg_num
+} karaok_prog_scene_msg_t;
+
+//�����ڷ����ô��ڵ���Ϣ
+typedef enum
+{
+	karaok_prog_scene_set_sta = GUI_MSG_ + 1
+
+} karaok_prog_scene_recv_msg_t;
+
+
+
+typedef struct
+{
+	H_WIN hparent;
+	__s32 scene_id;
+	H_LYR hlyr;
+} karaok_prog_create_para_t;
+
+
+
+typedef union
+{
+	struct
+	{
+		__s32    hour;
+		__s32    minute;
+		__s32    second;
+	}
+	data1;
+	__s32 data2[3];
+} karaok_prog_cuckoo_time_t;
+
+
+
+typedef enum
+{
+  karaok_prog_pause = 0,
+  karaok_prog_play,
+  karaok_prog_playsta_num
+} karaok_prog_playsta_t;
+
+typedef enum
+{
+	karaok_prog_lyrhide = 0,
+	karaok_prog_lyrshow,
+	karaok_prog_lyrnum
+}karaok_prog_lyrsta_t;
+
+typedef struct
+{
+	H_WIN hparent;
+	__s32 scene_id;
+	H_LYR hlyr;
+	H_WIN hfrm;
+	karaok_prog_playsta_t playsta;	
+	__s32 cur_time_index;
+	karaok_prog_cuckoo_time_t cur_time;
+	__u8 prog_timmer_id;
+	__u8 proglyr_timmer_id;
+	__u8 TouchMoveFlag;
+	__u8 TouchDownFlag;
+	__u8 track;
+	karaok_prog_lyrsta_t prog_lyr_status;
+}
+karaok_prog_scene_t;
+
+
+
+static __s32 karaok_prog_init_ui(void);
+static __s32 karaok_prog_deinit_ui(void);
+static __s32 karaok_prog_install_timmer(karaok_prog_scene_t *scene_para);
+static __s32 karaok_prog_uninstall_timmer(karaok_prog_scene_t *scene_para);
+static __s32 karaok_prog_paint_update(karaok_prog_scene_t *scene_para,__s32 new_cur_time);
+static __s32 karaok_prog_paint(karaok_prog_scene_t *scene_para,__u32 ui_type);
+static __s32 karaokc_prog_draw(karaok_prog_scene_t *scene_para);
+static __s32 karaok_prog_touch(__gui_msg_t *msg);
+static __s32 karaok_prog_proc(__gui_msg_t *msg);
+static __s32 karaok_prog_scene_movelayer(karaok_prog_scene_t *scene_para);
+void *karaok_prog_scene_create(karaok_prog_create_para_t *create_para);
+__s32 karaok_prog_scene_delete(void *handle);
+__s32 karaok_prog_scene_set_focus(void *handle);
+H_WIN karaokc_prog_scene_get_hwnd(void *handle);
+
+
+
+#endif

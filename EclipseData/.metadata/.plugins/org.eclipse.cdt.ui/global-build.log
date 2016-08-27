@@ -1,0 +1,21 @@
+10:32:36 **** Build of configuration Release for project C500_NetStoryTP_Xr819_V1.0 ****
+make all 
+make:  makefile:  line 5:  Error -- Expecting macro or rule defn, found neither
+12:31:36 **** Build of configuration Release for project C500_NetStoryTP_Xr819_V1.0 ****
+make all 
+make:  makefile:  line 5:  Error -- Expecting macro or rule defn, found neither
+12:31:39 **** Build of configuration Debug for project C500_Test ****
+make all 
+make:  makefile:  line 5:  Error -- Expecting macro or rule defn, found neither
+12:31:44 **** Build of configuration Release for project MelisC100A_1024x600_TEST ****
+make all 
+make:  makefile:  line 5:  Error -- Expecting macro or rule defn, found neither
+12:32:00 **** Build of configuration Debug for project WS_C100A_DEMOD_V1.0_20151009 ****
+make all 
+make:  makefile:  line 5:  Error -- Expecting macro or rule defn, found neither
+09:54:35 **** Build of configuration Release for project C500_NetStoryTP_Xr819_V1.0 ****
+make all 
+make:  makefile:  line 5:  Error -- Expecting macro or rule defn, found neither
+09:54:38 **** Build of configuration Debug for project C500_Test ****
+make all 
+make:  makefile:  line 5:  Error -- Expecting macro or rule defn, found neither

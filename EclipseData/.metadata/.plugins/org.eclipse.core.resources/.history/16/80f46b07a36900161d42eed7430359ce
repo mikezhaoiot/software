@@ -1,0 +1,32 @@
+#Source Insight 
+*.VPJ
+*.VPW
+*.vpwhist
+*.vtg
+*.IAB
+*.IAD
+*.IMB
+*.IMD
+*.PFI
+*.PRI
+*.PO
+*.PR
+*.PS
+*.SearchResults
+*.WK3
+*.vtg
+*.vpwhist
+*.cproject
+
+#C libary
+*.o
+
+#Melis
+tools/
+softwares/
+Document/
+RemoteSystemsTempFiles/
+.metadata/
+.settings/
+*.script
+*.face

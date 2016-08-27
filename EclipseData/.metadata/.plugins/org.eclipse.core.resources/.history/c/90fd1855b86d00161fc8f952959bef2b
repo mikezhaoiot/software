@@ -1,0 +1,996 @@
+/*
+**************************************************************************************************************
+*											        ePDK
+*						            the Easy Portable/Player Develop Kits
+*									            desktop system
+*
+*						        	 (c) Copyright 2007-2010, ANDY, China
+*											  All Rights Reserved
+*
+* File    	: headbar_com.c
+* By      	: Andy.zhang
+* Func		: app bar view
+* Version	: v1.0
+* ============================================================================================================
+* 2009-9-24 15:12:06  andy.zhang  create this file, implements the fundemental interface;
+**************************************************************************************************************
+*/
+
+#include "mod_init_i.h"
+#include "headbar_uipara.h"
+#include "headbar_com.h"
+#include "..\\live_init.h"
+
+__s32 charge_flag = 0;
+__u8  Wechat_Flag = 0;
+static __u8 touch_back_down = 0;
+
+
+static __s32 power_level_2_display(power_level_e level)
+{
+	u8 ret = 0;
+	switch(level)
+	{
+		case DSK_POWER_LEVEL_0:
+			ret = 0;
+			break;
+		case DSK_POWER_LEVEL_1:
+			ret = 1;
+			break;
+		case DSK_POWER_LEVEL_2:
+			ret = 2;
+			break;
+		case DSK_POWER_LEVEL_3:
+			ret = 3;
+			break;
+
+		case DSK_POWER_LEVEL_4:
+			ret = 4;
+			break;
+		case DSK_POWER_LEVEL_5:
+			ret = 5;
+			break;
+		default:
+			ret = 0;
+			break;
+	}
+	return ret;
+}
+
+static void reset_headbar_data(headbar_para_t *para)
+{
+	power_level_e	 	level;
+	__bool              charge_state;
+	dsk_power_get_voltage_level(&level);
+ 	para->data.vol_level  = level;
+	para->data.charge_sta = dsk_get_charge_state();         
+	eLIBs_memset(para->volume_buf, 0, 32);
+	eLIBs_int2str_dec(para->data.volume, para->volume_buf);
+}
+
+static void init_headbar_para(__gui_msg_t *p_msg, headbar_para_t *para)
+{
+	int 					i;
+	para->hbar   					= p_msg->h_deswin;
+	para->layer_rect.x				= headbar_uipara.hbar_lyr.scn_x;
+	para->layer_rect.y				= headbar_uipara.hbar_lyr.scn_y;	
+	para->layer_rect.width			= headbar_uipara.hbar_lyr.scn_w;
+	para->layer_rect.height			= headbar_uipara.hbar_lyr.scn_h;
+	
+	para->time_rect[0].x 			= headbar_uipara.time[0].x;
+	para->time_rect[0].y 			= headbar_uipara.time[0].y;
+	para->time_rect[0].width 		= headbar_uipara.time[0].w;
+	para->time_rect[0].height		= headbar_uipara.time[0].h;
+
+	para->time_rect[1].x 			= headbar_uipara.time[1].x;
+	para->time_rect[1].y 			= headbar_uipara.time[1].y;
+	para->time_rect[1].width 		= headbar_uipara.time[1].w;
+	para->time_rect[1].height		= headbar_uipara.time[1].h;
+	
+	para->time_rect[2].x 			= headbar_uipara.time[2].x;
+	para->time_rect[2].y 			= headbar_uipara.time[2].y;
+	para->time_rect[2].width 		= headbar_uipara.time[2].w;
+	para->time_rect[2].height		= headbar_uipara.time[2].h;
+	
+	para->time_rect[3].x 			= headbar_uipara.time[3].x;
+	para->time_rect[3].y 			= headbar_uipara.time[3].y;
+	para->time_rect[3].width 		= headbar_uipara.time[3].w;
+	para->time_rect[3].height		= headbar_uipara.time[3].h;
+	
+	para->time_rect[4].x 			= headbar_uipara.time[4].x;
+	para->time_rect[4].y 			= headbar_uipara.time[4].y;
+	para->time_rect[4].width 		= headbar_uipara.time[4].w;
+	para->time_rect[4].height		= headbar_uipara.time[4].h;
+
+	para->volume_rect.x 			= headbar_uipara.volume_icon.x;
+	para->volume_rect.y 			= headbar_uipara.volume_icon.y;
+	para->volume_rect.width 		= headbar_uipara.volume_icon.w;
+	para->volume_rect.height 		= headbar_uipara.volume_icon.h;
+
+	para->volume_data_rect.x 		= headbar_uipara.volume_txt.x;
+	para->volume_data_rect.y 		= headbar_uipara.volume_txt.y;
+	para->volume_data_rect.width	= headbar_uipara.volume_txt.w;
+	para->volume_data_rect.height 	= headbar_uipara.volume_txt.h;
+
+	para->vol_rect.x 				= headbar_uipara.battery.x;
+	para->vol_rect.y 				= headbar_uipara.battery.y;
+	para->vol_rect.width  	    	= headbar_uipara.battery.w;
+	para->vol_rect.height    		= headbar_uipara.battery.h;
+	para->title_rect.x				= headbar_uipara.title.x;
+	para->title_rect.y				= headbar_uipara.title.y;
+	para->title_rect.width			= headbar_uipara.title.w;
+	para->title_rect.height			= headbar_uipara.title.h;
+	///wifi_signal
+	para->wifi_signal_rect.x		= headbar_uipara.wifi_signal_rect.x;
+	para->wifi_signal_rect.y		= headbar_uipara.wifi_signal_rect.y;
+	para->wifi_signal_rect.width	= headbar_uipara.wifi_signal_rect.w;
+	para->wifi_signal_rect.height	= headbar_uipara.wifi_signal_rect.h;
+	/*clock time*/
+	para->clock_rect.x				= headbar_uipara.clock_rect.x;
+	para->clock_rect.y				= headbar_uipara.clock_rect.y;
+	para->clock_rect.width			= headbar_uipara.clock_rect.w;
+	para->clock_rect.height			= headbar_uipara.clock_rect.h;	
+	///show_text
+	para->show_text_rect.x			= headbar_uipara.show_text_rect.x;
+	para->show_text_rect.y			= headbar_uipara.show_text_rect.y;
+	para->show_text_rect.width		= headbar_uipara.show_text_rect.w;
+	para->show_text_rect.height		= headbar_uipara.show_text_rect.h;
+	
+	para->home_bmp_rect.x			= headbar_uipara.home_bmp_rect.x;
+	para->home_bmp_rect.y			= headbar_uipara.home_bmp_rect.y;
+	para->home_bmp_rect.width		= headbar_uipara.home_bmp_rect.w;
+	para->home_bmp_rect.height		= headbar_uipara.home_bmp_rect.h;
+	para->wechat_messge_rect.x		= headbar_uipara.wechat_messge.x;
+	para->wechat_messge_rect.y		= headbar_uipara.wechat_messge.y;
+	para->wechat_messge_rect.width	= headbar_uipara.wechat_messge.w;
+	para->wechat_messge_rect.height	= headbar_uipara.wechat_messge.h;
+
+	para->back_bmp_rect.x			= headbar_uipara.back_bmp_rect.x;
+	para->back_bmp_rect.y			= headbar_uipara.back_bmp_rect.y;
+	para->back_bmp_rect.width		= headbar_uipara.back_bmp_rect.w;
+	para->back_bmp_rect.height		= headbar_uipara.back_bmp_rect.h;
+
+	para->weather_bmp_rect.x		= headbar_uipara.weather_bmp_rect.x;
+	para->weather_bmp_rect.y		= headbar_uipara.weather_bmp_rect.y;
+	para->weather_bmp_rect.width	= headbar_uipara.weather_bmp_rect.w;
+	para->weather_bmp_rect.height	= headbar_uipara.weather_bmp_rect.h;
+
+	para->vol_id[0]				 	= headbar_uipara.res_id.vol_id0;
+	para->vol_id[1] 				= headbar_uipara.res_id.vol_id1;
+	para->vol_id[2] 				= headbar_uipara.res_id.vol_id2;
+	para->vol_id[3] 				= headbar_uipara.res_id.vol_id3;
+	para->vol_id[4] 				= headbar_uipara.res_id.vol_id4;
+	para->vol_id[5] 				= headbar_uipara.res_id.vol_id5;
+	para->vol_id_charge[0] 			= headbar_uipara.res_id.charge_vol_id0;
+	para->vol_id_charge[1] 			= headbar_uipara.res_id.charge_vol_id1;
+	para->vol_id_charge[2] 			= headbar_uipara.res_id.charge_vol_id2;
+	para->vol_id_charge[3] 			= headbar_uipara.res_id.charge_vol_id3;
+	para->vol_id_charge[4] 			= headbar_uipara.res_id.charge_vol_id4;
+	para->vol_id_charge[5] 			= headbar_uipara.res_id.charge_vol_id5;
+	for(i = 0 ;i < HB_APP_HEADBAR_MAX ; i++)
+	{
+		dsk_langres_get_menu_text(headbar_uipara.res_id.text[i],para->app_show_text[i], sizeof(para->app_show_text[i]));
+	}
+	dsk_langres_get_menu_text(headbar_uipara.res_id.wechat_messge_ex,para->wechat_messge, sizeof(para->wechat_messge));
+	for(i = 0; i < MAX_VOL_LEVEL; i++)
+	{
+		para->vol_htheme[i] = dsk_theme_open(para->vol_id[i]);
+		para->vol_bmp[i]	= dsk_theme_hdl2buf(para->vol_htheme[i]);
+		para->vol_htheme_charge[i] = dsk_theme_open(para->vol_id_charge[i]);
+		para->vol_bmp_charge[i]	= dsk_theme_hdl2buf(para->vol_htheme_charge[i]);
+	}
+	for(i = 0; i <= 4; i++)
+	{
+		para->wifi_bmp[i] =	dsk_theme_open(headbar_uipara.res_id.wifi[i]); 
+	}
+	for(i = 0; i <= 11; i++)
+	{
+		para->clock_bmp[i] =	dsk_theme_open(headbar_uipara.res_id.clock[i]); 
+	}	
+	para->wechat_bmp		= dsk_theme_open(headbar_uipara.res_id.wechat_messge);
+	//para->volume_htheme0	= dsk_theme_open(headbar_uipara.res_id.volume_id0);
+	//para->volume_htheme1	= dsk_theme_open(headbar_uipara.res_id.volume_id1);
+	para->home_htheme		= dsk_theme_open(headbar_uipara.res_id.home_bmp_id);
+	para->back_bmp[0]		= dsk_theme_open(headbar_uipara.res_id.head_back[0]);
+	para->back_bmp[1]		= dsk_theme_open(headbar_uipara.res_id.head_back[1]);
+	//para->weather_bmp		= dsk_theme_open(headbar_uipara.res_id.head_weather);	
+	//para->volume_bmp0		= dsk_theme_hdl2buf(para->volume_htheme0);
+	//para->volume_bmp1		= dsk_theme_hdl2buf(para->volume_htheme1);	
+	para->font				= headbar_uipara.font;
+	
+	reset_headbar_data(para);
+}
+
+
+static void deinit_headbar_para(headbar_para_t *para)
+{
+	int i;
+	for(i = 0; i < MAX_VOL_LEVEL; i++)
+	{
+		dsk_theme_close(para->vol_htheme[i]);
+		dsk_theme_close(para->vol_htheme_charge[i]);
+	}
+	for(i = 0; i < 4; i++)
+	{
+		dsk_theme_close(para->wifi_bmp[i]);
+	}
+	for(i = 0; i <= 11; i++)
+	{
+		dsk_theme_close(para->clock_bmp[i]);
+	}
+	dsk_theme_close(para->volume_htheme0);
+	dsk_theme_close(para->volume_htheme1);
+	dsk_theme_close(para->home_htheme);
+	dsk_theme_close(para->wechat_bmp);
+	dsk_theme_close(para->back_bmp[0]);
+	dsk_theme_close(para->back_bmp[1]);
+	dsk_theme_close(para->weather_bmp);
+
+}
+
+static void headbar_refresh_thread(void *arg)
+{
+	headbar_para_t *para = (headbar_para_t *)arg;
+	headbar_data_t	new_data;
+	H_WIN lyr;
+	__gui_msg_t 	msg;
+	__s32 ret;
+	static __s32 state_flag = 0, flag = 0, wechat_num = 0; 
+	char linkName[64] = {0};
+	lyr = GUI_WinGetLyrWin(para->hbar);
+	while(1)
+	{
+		if(esKRNL_TDelReq(OS_PRIO_SELF) == OS_TASK_DEL_REQ)
+		{
+			esKRNL_TDel(OS_PRIO_SELF);
+			return;
+		}
+		/*headbar ��������*/
+		if(state_flag != show_text_state)
+		{
+			NOTIFY_MSG(HBAR_TEXT_PAINT,NULL,para->hbar,0,0);
+			state_flag = show_text_state;
+		}
+		if(GUI_LYRWIN_STA_ON == GUI_LyrWinGetSta(lyr))
+		{
+			esTIME_GetTime(&new_data.time);
+//			Funprintf("--%04d-%02d-%02d %2d:%2d:%2d--\n\n",new_data.date.year,new_data.date.month,new_data.date.day,\
+//					new_data.time.hour,new_data.time.minute,new_data.time.second);
+			if((new_data.time.hour != para->data.time.hour)||(new_data.time.minute != para->data.time.minute))
+			{
+				para->data.time = new_data.time;
+				wifi_get_linkName(linkName);
+				if(eLIBs_strlen(linkName))
+				{
+					Funprintf("--headbar time here--\n");
+					NOTIFY_MSG(HBAR_TIME_PAINT,NULL,para->hbar,0,0);
+				}
+			}
+			if(flag > HBAR_WIFI_SIGNAL_TIME)
+			{
+				char name[64] = {0};
+				__u8 lev = 0;
+				__s32 ret = 0;
+				if(wifi_state == 1)
+				{
+					ret = wifi_get_linkState(name,&lev);
+				}
+				if(eLIBs_strlen(name))
+				{	
+					NOTIFY_MSG(HBAR_WIFI_PAINT,NULL,para->hbar,lev,0);	
+				}
+				else
+				{	
+					NOTIFY_MSG(HBAR_WIFI_PAINT,NULL,para->hbar,0,0);	
+				}
+				flag = 1;
+			}
+	
+			
+			if(wechat_num != wechat_msessge_num)
+			{
+				Wechat_Flag = 1;
+				wechat_num = wechat_msessge_num;
+				if(wechat_msessge_num == 0)
+				{
+					NOTIFY_MSG(HBAR_WECHAT_MSSSGE,NULL,para->hbar,wechat_num,0);
+				}
+				else
+				{
+					NOTIFY_MSG(HBAR_WECHAT_MSSSGE,NULL,para->hbar,wechat_num,1);
+				}
+			}
+			flag ++;
+		}
+		esKRNL_TimeDly(10);		
+	}
+}
+static __s32 headbar_on_paint_argb(__gui_msg_t *msg, headbar_paint_e mode)
+{
+	headbar_para_t 	*p_ctrl;
+	RECT           	fbrect;
+	H_LYR		   	layer;
+	GUI_FONT	   	*font;
+	p_ctrl 	= &(((headbar_ctl_t *)GUI_WinGetAttr(msg->h_deswin))->para);
+	GUI_WinGetClientFBRect(msg->h_deswin, &fbrect);
+	font 	= p_ctrl->font;
+	layer  	= (H_LYR)GUI_WinGetLyrWin(msg->h_deswin);
+	if(GUI_LYRWIN_STA_SUSPEND == GUI_LyrWinGetSta(layer))
+	{
+		return EPDK_OK;
+	}
+	GUI_LyrWinSel(GUI_WinGetLyrWin(msg->h_deswin));
+	GUI_SetFont(SWFFont);
+	GUI_SetColor(GUI_WHITE);
+	GUI_SetBkColor(0x00);
+	GUI_UC_SetEncodeUTF8();
+	switch(mode)
+	{
+		case HB_PAINT_INIT:			/* ȫ������ */
+		{
+			__u8 i;
+			GUI_RECT rect;
+			__bool charge_sta;
+			power_level_e level;
+			dsk_power_get_voltage_level(&level);
+			p_ctrl->data.vol_level = power_level_2_display(level); 
+			p_ctrl->data.charge_sta = dsk_get_charge_state();
+			GUI_SetDrawMode(GUI_DRAWMODE_NORMAL);
+			if(EPDK_TRUE == p_ctrl->data.charge_sta)
+			{
+				GUI_BMP_Draw(p_ctrl->vol_bmp_charge[p_ctrl->data.vol_level], p_ctrl->vol_rect.x, p_ctrl->vol_rect.y);
+			}
+			else
+			{
+				GUI_BMP_Draw(p_ctrl->vol_bmp[p_ctrl->data.vol_level], p_ctrl->vol_rect.x, p_ctrl->vol_rect.y);
+			}
+			charge_flag = p_ctrl->data.vol_level;
+			//text
+			rect.x0 = p_ctrl->show_text_rect.x;
+			rect.y0 = p_ctrl->show_text_rect.y;
+			rect.x1 = rect.x0 + p_ctrl->show_text_rect.width;
+			rect.y1 = rect.y0 + p_ctrl->show_text_rect.height;
+			//wifi signal
+			if(p_ctrl->wifi_signal < 20)
+				i = 0;
+			else if(p_ctrl->wifi_signal < 30)
+				i = 1;
+			else if(p_ctrl->wifi_signal < 50)
+				i = 2;
+			else if(p_ctrl->wifi_signal < 70)
+				i = 3;
+			else
+				i = 4;
+			GUI_BMP_Draw(dsk_theme_hdl2buf(p_ctrl->wifi_bmp[i]), p_ctrl->wifi_signal_rect.x, p_ctrl->wifi_signal_rect.y);
+			return EPDK_OK;
+		}	
+		case HB_PAINT_VOL:		
+		{
+			__s32 vol_level;
+			__bool charge_sta;
+			power_level_e level;
+			dsk_power_get_voltage_level(&level);
+			vol_level = power_level_2_display(level);  	
+			charge_sta = dsk_get_charge_state();
+			p_ctrl->data.vol_level = vol_level;
+			p_ctrl->data.charge_sta = charge_sta;
+			if(EPDK_TRUE == p_ctrl->data.charge_sta && EPDK_FALSE == dsk_power_is_full_charge())
+			{
+				GUI_BMP_Draw(p_ctrl->vol_bmp_charge[charge_flag], p_ctrl->vol_rect.x, p_ctrl->vol_rect.y);
+				if(++charge_flag >= MAX_VOL_LEVEL)
+				{
+					charge_flag = vol_level;
+				}
+			}
+			else
+			{
+				GUI_BMP_Draw(p_ctrl->vol_bmp[p_ctrl->data.vol_level], p_ctrl->vol_rect.x, p_ctrl->vol_rect.y);
+				charge_flag = vol_level;
+			}
+			return EPDK_OK;
+		}	
+		case HB_PAINT_TIME:		/* ���µ�ǰʱ�� */
+		{
+			__u8 i;
+			__time_t time;	
+			__u8 hour_ge = 0,houre_shi = 0,minute_ge = 0,minute_shi = 0;
+			esTIME_GetTime(&time);			
+			houre_shi = time.hour/10;
+			hour_ge = time.hour%10;
+			minute_shi = time.minute/10;
+			minute_ge  = time.minute%10;
+
+			if(p_ctrl->wifi_linked == 0)
+			{
+				//���ԭwifi,bat����.
+				GUI_ClearRect(p_ctrl->wifi_signal_rect.x, 0, p_ctrl->layer_rect.width, p_ctrl->layer_rect.height);
+			
+				p_ctrl->wifi_signal_rect.x -= (p_ctrl->layer_rect.width - p_ctrl->time_rect[0].x);
+				p_ctrl->vol_rect.x -= (p_ctrl->layer_rect.width - p_ctrl->time_rect[0].x);
+
+				headbar_on_paint(msg, HB_PAINT_WIFI_BMP);
+				headbar_on_paint(msg, HB_PAINT_VOL);
+				p_ctrl->wifi_linked = 1;
+			}
+			
+			GUI_BMP_Draw(dsk_theme_hdl2buf(p_ctrl->clock_bmp[houre_shi]), p_ctrl->time_rect[0].x, p_ctrl->time_rect[0].y);	
+			GUI_BMP_Draw(dsk_theme_hdl2buf(p_ctrl->clock_bmp[hour_ge]), p_ctrl->time_rect[1].x, p_ctrl->time_rect[1].y);	
+			
+			GUI_BMP_Draw(dsk_theme_hdl2buf(p_ctrl->clock_bmp[10]), p_ctrl->time_rect[2].x,p_ctrl->time_rect[2].y);	
+			
+			GUI_BMP_Draw(dsk_theme_hdl2buf(p_ctrl->clock_bmp[minute_shi]), p_ctrl->time_rect[3].x, p_ctrl->time_rect[3].y);
+			GUI_BMP_Draw(dsk_theme_hdl2buf(p_ctrl->clock_bmp[minute_ge]), p_ctrl->time_rect[4].x, p_ctrl->time_rect[4].y);
+			return EPDK_OK;
+		}
+		case HB_PAINT_VOLUME:		/*  �������� */
+		{
+			GUI_ClearRect(p_ctrl->volume_data_rect.x,p_ctrl->volume_data_rect.y,
+						  p_ctrl->volume_data_rect.x + p_ctrl->volume_data_rect.width -1, p_ctrl->volume_data_rect.y + p_ctrl->volume_data_rect.height -1);
+			if(SLIB_atoi(p_ctrl->volume_buf))
+			{
+				GUI_BMP_Draw(p_ctrl->volume_bmp1, p_ctrl->volume_rect.x, p_ctrl->volume_rect.y);
+			}
+			GUI_DispStringAt( p_ctrl->volume_buf ,p_ctrl->volume_data_rect.x, p_ctrl->volume_data_rect.y);
+		}
+		return EPDK_OK;
+
+		case HB_PAINT_TEXT:
+		{
+			GUI_RECT rect;
+			GUI_ClearRect(p_ctrl->show_text_rect.x,p_ctrl->show_text_rect.y,
+				  p_ctrl->show_text_rect.x + p_ctrl->show_text_rect.width - 1,p_ctrl->show_text_rect.y + p_ctrl->show_text_rect.height - 1);
+			rect.x0 = p_ctrl->show_text_rect.x;
+			rect.y0 = p_ctrl->show_text_rect.y;
+			rect.x1 = rect.x0 + p_ctrl->show_text_rect.width;
+			rect.y1 = rect.y0 + p_ctrl->show_text_rect.height;
+			if(show_text_state == HB_APP_DELETE)
+			{
+				GUI_SetColor(GUI_RED);
+			}
+			else 
+			{
+				GUI_SetColor(GUI_WHITE);	
+				/*�������ֲ���ʾ*/
+				return EPDK_OK;			
+			}
+			GUI_DispStringInRect(p_ctrl->app_show_text[show_text_state],&rect,GUI_TA_VCENTER | GUI_TA_HCENTER);	
+			return EPDK_OK;
+		}
+		case HB_PAINT_HOME_BMP:
+		{
+			GUI_RECT rect;
+			rect.x0 = p_ctrl->home_bmp_rect.x;
+			rect.y0 = p_ctrl->home_bmp_rect.y;
+			rect.x1 = rect.x0+GUI_BMP_GetXSize(dsk_theme_hdl2buf(p_ctrl->home_htheme));	
+			rect.y1 = rect.y0 + GUI_BMP_GetYSize(dsk_theme_hdl2buf(p_ctrl->home_htheme));	
+			GUI_ClearRect(rect.x0,rect.y0,rect.x1,rect.y1);	
+			if(msg->dwAddData1)
+			{
+				GUI_BMP_Draw(dsk_theme_hdl2buf(p_ctrl->home_htheme), p_ctrl->home_bmp_rect.x, p_ctrl->home_bmp_rect.y);
+			}
+			return EPDK_OK;
+		}
+		case HB_PAINT_BACK_BMP:
+		{
+			GUI_RECT rect;
+			rect.x0 = p_ctrl->back_bmp_rect.x;
+			rect.y0 = p_ctrl->back_bmp_rect.y;
+			rect.x1 = rect.x0 + GUI_BMP_GetXSize(dsk_theme_hdl2buf(p_ctrl->back_bmp[0]));	
+			rect.y1 = rect.y0 + GUI_BMP_GetYSize(dsk_theme_hdl2buf(p_ctrl->back_bmp[0]));
+			
+
+			if(msg->dwAddData1)
+			{
+				GUI_BMP_Draw(dsk_theme_hdl2buf(p_ctrl->back_bmp[0]), p_ctrl->back_bmp_rect.x, p_ctrl->back_bmp_rect.y);
+			}
+			else
+			{
+				GUI_ClearRect(rect.x0,rect.y0,rect.x1,rect.y1);	
+			}
+			return EPDK_OK;
+		}
+		case HB_PAINT_BACK_FC_BMP:
+		{
+			GUI_BMP_Draw(dsk_theme_hdl2buf(p_ctrl->back_bmp[1]), p_ctrl->back_bmp_rect.x, p_ctrl->back_bmp_rect.y);
+			return EPDK_OK;
+		}
+				
+		case HB_PAINT_WEATHER_BMP:
+		{
+			GUI_RECT rect;
+			if(msg->dwAddData1)
+			{				
+				rect.x0 = p_ctrl->weather_bmp_rect.x;
+				rect.y0 = p_ctrl->weather_bmp_rect.y;
+				rect.x1 = rect.x0 + GUI_BMP_GetXSize(dsk_theme_hdl2buf(p_ctrl->weather_bmp));	
+				rect.y1 = rect.y0 + GUI_BMP_GetYSize(dsk_theme_hdl2buf(p_ctrl->weather_bmp));
+				GUI_ClearRect(rect.x0,rect.y0,rect.x1,rect.y1);	
+				GUI_BMP_Draw(dsk_theme_hdl2buf(p_ctrl->weather_bmp), p_ctrl->home_bmp_rect.x, p_ctrl->home_bmp_rect.y);
+			}
+			else 
+			{
+				/*rect.x0 = p_ctrl->weather_bmp_rect.x;
+				rect.y0 = p_ctrl->weather_bmp_rect.y;
+				rect.x1 = rect.x0 + GUI_BMP_GetXSize(dsk_theme_hdl2buf(p_ctrl->weather_bmp));	
+				rect.y1 = rect.y0 + GUI_BMP_GetYSize(dsk_theme_hdl2buf(p_ctrl->weather_bmp));*/
+
+				
+				GUI_BMP_Draw(dsk_theme_hdl2buf(p_ctrl->weather_bmp), p_ctrl->weather_bmp_rect.x, p_ctrl->weather_bmp_rect.y);
+			}
+			return EPDK_OK;
+		}
+		case HB_PAINT_WIFI_BMP:
+		{
+			__u8 i;
+			if(p_ctrl->wifi_signal < 20)
+				i = 0;
+			else if(p_ctrl->wifi_signal < 30)
+				i = 1;
+			else if(p_ctrl->wifi_signal < 50)
+				i = 2;
+			else if(p_ctrl->wifi_signal < 70)
+				i = 3;
+			else
+				i = 4;
+			GUI_BMP_Draw(dsk_theme_hdl2buf(p_ctrl->wifi_bmp[i]), p_ctrl->wifi_signal_rect.x, p_ctrl->wifi_signal_rect.y);
+			return EPDK_OK;
+		}		
+		case HB_PAINT_WECHAT_MESSGE:
+		{
+			GUI_RECT rect;
+			if(msg->dwAddData2)
+			{
+				Funprintf("--here--\n");
+				GUI_ClearRect(p_ctrl->wechat_messge_rect.x+50, p_ctrl->wechat_messge_rect.y,
+							  p_ctrl->wechat_messge_rect.x+50 + p_ctrl->wechat_messge_rect.width -1,p_ctrl->wechat_messge_rect.y + p_ctrl->wechat_messge_rect.height);
+				if(p_ctrl->data.wechat_messge_num)
+				{
+					char buf[32] = {0};
+					char buf1[5] = {0};
+					GUI_BMP_Draw(dsk_theme_hdl2buf(p_ctrl->wechat_bmp), p_ctrl->wechat_messge_rect.x, p_ctrl->wechat_messge_rect.y);
+					/*
+					eLIBs_int2str_dec(p_ctrl->data.wechat_messge_num, buf1);
+					eLIBs_strcpy(buf,buf1);
+					//eLIBs_strcat(buf,p_ctrl->wechat_messge);
+					rect.x0 = p_ctrl->wechat_messge_rect.x + 50;
+					rect.y0 = p_ctrl->wechat_messge_rect.y;
+					rect.x1 = rect.x0 + p_ctrl->wechat_messge_rect.width;
+					rect.y1 = rect.y0 + p_ctrl->wechat_messge_rect.height;
+					GUI_DispStringInRect(buf, &rect, GUI_TA_VCENTER | GUI_TA_LEFT);*/
+				}
+			}
+			else 
+			{
+				Funprintf("--here--\n");
+				GUI_ClearRect(p_ctrl->wechat_messge_rect.x, p_ctrl->wechat_messge_rect.y,p_ctrl->wechat_messge_rect.x+p_ctrl->wechat_messge_rect.width+50,p_ctrl->wechat_messge_rect.y + p_ctrl->wechat_messge_rect.height);
+			}
+		}
+		default:
+			break;
+	}
+
+	return EPDK_OK;
+}
+
+static __s32 headbar_on_paint(__gui_msg_t *msg, headbar_paint_e mode)
+{
+	H_LYR	layer;
+	FB		fb;
+	layer  	= (H_LYR)GUI_WinGetLyrWin(msg->h_deswin);
+	GUI_LyrWinGetFB(layer, &fb);
+	headbar_on_paint_argb(msg, mode);
+	return EPDK_OK;
+}
+
+static __s32 headbar_cmd2parent(__u32 id,__u32 data1,__u32 data2)
+{
+	__gui_msg_t msg;
+	if(msg.h_deswin = GUI_WinGetHandFromName("beetles"))
+	{
+		msg.h_srcwin = NULL;
+		if(id == HB_APP_HEADBAR_MAX)
+		{
+			msg.id = MSG_APP_DELETE_SOURCE;
+		}
+		else
+		{
+			msg.id = MSG_APP_BACK_HOME;
+		}
+		msg.dwAddData1 = MAKELONG(MSG_APP_BACK_HOME, id);
+		msg.dwAddData2 = data1;
+		msg.dwReserved = data2;
+		GUI_SendNotifyMessage(&msg);
+		return EPDK_OK;
+	}
+	return EPDK_FAIL;
+}
+
+static __s32 headbar_back_cmd2parent(void)
+{
+	__gui_msg_t msg;
+	if(msg.h_deswin = GUI_WinGetHandFromName("beetles"))
+	{
+		NOTIFY_MSG(GUI_MSG_KEY,NULL,msg.h_deswin,GUI_MSG_KEY_ESCAPE,KEY_DOWN_ACTION);					
+		esKRNL_TimeDly(20);
+		NOTIFY_MSG(GUI_MSG_KEY,NULL,msg.h_deswin,GUI_MSG_KEY_ESCAPE,KEY_UP_ACTION);					
+		return EPDK_OK;
+	}
+	return EPDK_FAIL;
+}
+
+static __s32 headbar_weather_cmd2parent(void)
+{
+	__gui_msg_t msg;
+	if(msg.h_deswin =  GUI_WinGetHandFromName("beetles"))
+	{		
+		NOTIFY_MSG(MSG_APP_WEATHER_CREATE,NULL,msg.h_deswin,0,0);					
+		return EPDK_OK;
+	}
+	return EPDK_FAIL;
+}
+static __s32 headbar_wechat_cmd2parent(void)
+{
+	__gui_msg_t msg;
+	if(msg.h_deswin = GUI_WinGetHandFromName("beetles"))
+	{		
+		NOTIFY_MSG(DSK_MSG_WECHAT_CREATE,NULL,msg.h_deswin,0,0);					
+		return EPDK_OK;
+	}
+	return EPDK_FAIL;
+}
+static __s32 headbar_wifi_cmd2parent(void)
+{
+	__gui_msg_t msg;
+	if(msg.h_deswin = GUI_WinGetHandFromName("beetles"))
+	{		
+		NOTIFY_MSG(MSG_APP_WIFI,NULL,msg.h_deswin,0,0);					
+		return EPDK_OK;
+	}
+	return EPDK_FAIL;
+}
+
+static __s32 headbar_cover_touch_paint(__gui_msg_t *p_msg)
+{
+	__u32 x = 0,y = 0;
+	headbar_para_t *p_ctrl;
+	headbar_ctl_t * headbar_ctrl;
+	headbar_ctrl = (headbar_ctl_t *)GUI_WinGetAttr(p_msg->h_deswin);
+	if(headbar_ctrl == NULL)
+	{
+		return EPDK_FAIL;
+	}
+	p_ctrl 	= &(headbar_ctrl->para);
+	x 		= LOSWORD(p_msg->dwAddData2);
+	y 		= HISWORD(p_msg->dwAddData2);
+
+
+	if(p_msg->dwAddData1 == GUI_MSG_TOUCH_UP)
+	{
+		if(GUI_WinGetCaptureWin() == p_msg->h_deswin)
+		{
+			GUI_WinReleaseCapture();
+		}
+		if(headbar_ctrl->touch_down_falg != EPDK_TRUE)
+		{
+			return EPDK_FAIL;
+		}
+		else
+		{
+			headbar_ctrl->touch_down_falg = EPDK_FALSE;
+		}
+		if((x > p_ctrl->home_bmp_rect.x-20) && (x < p_ctrl->home_bmp_rect.x+p_ctrl->home_bmp_rect.width+20) && (y <= p_ctrl->layer_rect.height+10))
+		{
+			if(HB_APP_HOME != show_text_state)
+			{
+				if(HB_APP_HOME_XXTD == show_text_state) 
+					headbar_back_cmd2parent();
+				else
+					headbar_cmd2parent(show_text_state,GUI_MSG_CLOSE,0);
+			}
+			else
+			{
+				//headbar_weather_cmd2parent();
+			}
+			return EPDK_OK;
+		}
+		else if(x > p_ctrl->show_text_rect.x && x < (p_ctrl->show_text_rect.x + p_ctrl->show_text_rect.width+30))
+		{
+		
+			if(y > p_ctrl->show_text_rect.y && y < (p_ctrl->show_text_rect.y + p_ctrl->show_text_rect.height+30))
+			{
+				if(show_text_state == HB_APP_DELETE)	
+				{
+					headbar_cmd2parent(HB_APP_HEADBAR_MAX,GUI_MSG_CLOSE,0);
+					return EPDK_OK;
+				}
+			}
+		}
+		else if((x > p_ctrl->back_bmp_rect.x-20)&&(x < p_ctrl->back_bmp_rect.x+p_ctrl->back_bmp_rect.width+20)&&(y <= p_ctrl->layer_rect.height+10))
+		{ 
+			if(HB_APP_HOME != show_text_state)
+			{
+				headbar_on_paint(p_msg, HB_PAINT_BACK_BMP);
+				touch_back_down = 0;
+				headbar_back_cmd2parent();
+			}
+			return EPDK_OK;
+		}
+		else if((x > p_ctrl->wechat_messge_rect.x)&&(x < p_ctrl->wechat_messge_rect.x + p_ctrl->wechat_messge_rect.width)&&(y <= p_ctrl->layer_rect.height))
+		{
+		
+			if(1 == Wechat_Flag)
+			{		
+				headbar_wechat_cmd2parent();
+			}
+			return EPDK_OK;
+		}
+		else if((x > p_ctrl->wifi_signal_rect.x)&&(x < p_ctrl->wifi_signal_rect.x + p_ctrl->wifi_signal_rect.width)&&(y <= p_ctrl->layer_rect.height))
+		{
+			Funprintf("--headbar touch wifi--\n");
+			headbar_wifi_cmd2parent();	
+			return EPDK_OK;
+		}
+		else
+		{
+			if(touch_back_down)
+			{
+				touch_back_down = 0;
+				headbar_on_paint(p_msg, HB_PAINT_BACK_BMP);
+			}
+		}		
+	}
+	else if(p_msg->dwAddData1 == GUI_MSG_TOUCH_DOWN)
+	{
+		GUI_WinSetCaptureWin(p_msg->h_deswin);
+		if((x > p_ctrl->home_bmp_rect.x-20) && (x < p_ctrl->home_bmp_rect.x+p_ctrl->home_bmp_rect.width+20) && (y <= p_ctrl->layer_rect.height+10))
+		{
+			headbar_ctrl->touch_down_falg = EPDK_TRUE;
+			if(HB_APP_HOME != show_text_state)
+			{
+				//headbar_cmd2parent(show_text_state,GUI_MSG_CLOSE,0);
+			}
+			else
+			{
+			}
+			return EPDK_OK;
+		}
+		else if(x > p_ctrl->show_text_rect.x && x < (p_ctrl->show_text_rect.x + p_ctrl->show_text_rect.width+30))
+		{
+		
+			if(y > p_ctrl->show_text_rect.y && y < (p_ctrl->show_text_rect.y + p_ctrl->show_text_rect.height+30))
+			{
+				headbar_ctrl->touch_down_falg = EPDK_TRUE;
+				if(show_text_state == HB_APP_DELETE)	//ɾ������
+				{
+					return EPDK_OK;
+				}
+			}
+		}
+		else if((x > p_ctrl->back_bmp_rect.x-20)&&(x < p_ctrl->back_bmp_rect.x+p_ctrl->back_bmp_rect.width+20)&&(y <= p_ctrl->layer_rect.height+10))
+		{
+			headbar_ctrl->touch_down_falg = EPDK_TRUE;
+			if(HB_APP_HOME != show_text_state)
+			{
+				headbar_on_paint(p_msg, HB_PAINT_BACK_FC_BMP);
+				touch_back_down = 1;
+			}
+			return EPDK_OK;
+		}
+		else if((x > p_ctrl->wechat_messge_rect.x)&&(x < p_ctrl->wechat_messge_rect.x + p_ctrl->wechat_messge_rect.width)&&(y <= p_ctrl->layer_rect.height))
+		{
+			headbar_ctrl->touch_down_falg = EPDK_TRUE;
+			if(1 == Wechat_Flag)
+			{		
+
+			}
+			return EPDK_OK;
+		}
+		else if((x > p_ctrl->wifi_signal_rect.x)&&(x < p_ctrl->wifi_signal_rect.x + p_ctrl->wifi_signal_rect.width)&&(y <= p_ctrl->layer_rect.height))
+		{
+			headbar_ctrl->touch_down_falg = EPDK_TRUE;
+			return EPDK_OK;
+		}
+	}	
+	else if(p_msg->dwAddData1 == GUI_MSG_TOUCH_MOVE)
+	{
+		if(headbar_ctrl->touch_down_falg == EPDK_TRUE)
+		{
+			headbar_ctrl->touch_down_falg = EPDK_FALSE;
+		}
+	}	
+	else
+	{
+		if(touch_back_down)
+		{
+			touch_back_down = 0;
+			headbar_on_paint(p_msg, HB_PAINT_BACK_BMP);
+		}
+
+	}	
+    return EPDK_FAIL;
+}
+static __s32 cb_headbar_framewin(__gui_msg_t *p_msg)
+{
+	switch(p_msg->id)
+	{
+		case GUI_MSG_CREATE:
+		{
+			headbar_ctl_t *p_ctrl;
+			p_ctrl = (headbar_ctl_t *)esMEMS_Malloc(0, sizeof(headbar_ctl_t));		
+			if(!p_ctrl)
+			{
+				__err("headbar_para_t malloc error \n");
+			}
+			eLIBs_memset(p_ctrl, 0, sizeof(headbar_ctl_t));
+			GUI_WinSetAttr(p_msg->h_deswin, p_ctrl);
+			init_headbar_para(p_msg, &(p_ctrl->para));
+			headbar_on_paint(p_msg, HB_PAINT_INIT);
+			GUI_SetTimer(p_msg->h_deswin, VOLTAGE_TIMER_ID, 100, NULL);
+			p_ctrl->refresh_tid =  esKRNL_TCreate(headbar_refresh_thread, &(p_ctrl->para), 0x800, KRNL_priolevel5);			
+			return EPDK_OK;
+		}
+		case GUI_MSG_DESTROY:
+		{
+			headbar_ctl_t *p_ctrl;
+			RECT 	fbrect;
+			H_LYR	layer;
+			p_ctrl = (headbar_ctl_t *)GUI_WinGetAttr(p_msg->h_deswin);
+			GUI_KillTimer(p_msg->h_deswin, VOLTAGE_TIMER_ID);
+			while(esKRNL_TDelReq(p_ctrl->refresh_tid) != OS_TASK_NOT_EXIST)
+			{
+				esKRNL_TimeDly(2);
+			}
+			layer  = (H_LYR)GUI_WinGetLyrWin(p_msg->h_deswin);
+			if(GUI_LYRWIN_STA_SUSPEND != GUI_LyrWinGetSta(layer))
+			{
+				GUI_LyrWinSel(layer);
+				GUI_SetBkColor(0);
+				GUI_WinGetClientFBRect(p_msg->h_deswin, &fbrect);
+				GUI_ClearRect(fbrect.x, fbrect.y, fbrect.x + fbrect.width - 1, fbrect.y + fbrect.height - 1);
+			}
+			deinit_headbar_para(&(p_ctrl->para));
+			esMEMS_Mfree(0, p_ctrl);
+			return EPDK_OK;
+		}
+		case GUI_MSG_CLOSE:
+		{
+			GUI_FrmWinDelete(p_msg->h_deswin);
+			return EPDK_OK;
+		}
+		case GUI_MSG_TIMER:
+		{
+			if(p_msg->dwAddData1 == VOLTAGE_TIMER_ID)
+			{
+				if(GUI_LYRWIN_STA_ON == GUI_LyrWinGetSta(GUI_WinGetLyrWin(p_msg->h_deswin)))
+				{
+					__s32  vol_level;
+					headbar_ctl_t *p_ctrl;
+					p_ctrl = (headbar_ctl_t *)GUI_WinGetAttr(p_msg->h_deswin);
+					if(EPDK_TRUE == p_ctrl->para.data.charge_sta || vol_level != p_ctrl->para.data.vol_level)	
+					{
+												
+						SEND_MSG(HBAR_VOL_PAINT,NULL,p_msg->h_deswin,0,0);							
+					}
+				}
+			}
+			return EPDK_OK;
+		}
+		case GUI_MSG_WIN_WAKEUP:
+		{
+			headbar_ctl_t *p_ctrl;
+			p_ctrl = (headbar_ctl_t *)GUI_WinGetAttr(p_msg->h_deswin);
+			reset_headbar_data(&(p_ctrl->para));
+			headbar_on_paint(p_msg, HB_PAINT_INIT);
+			return EPDK_OK;
+		}
+		case GUI_MSG_TOUCH:
+		{
+			headbar_cover_touch_paint(p_msg);	
+			return EPDK_OK;
+		}
+		case HBAR_VOL_PAINT:
+		{
+			headbar_on_paint(p_msg, HB_PAINT_VOL);
+			return EPDK_OK;
+		}
+		case HBAR_VOLUME_PAINT:
+		{
+			headbar_ctl_t  *p_ctrl;
+			headbar_para_t *para;
+			p_ctrl = (headbar_ctl_t *)GUI_WinGetAttr(p_msg->h_deswin);
+			para   = &(p_ctrl->para);
+			para->data.volume = p_msg->dwAddData1;
+			eLIBs_memset(para->volume_buf, 0, 32);
+			eLIBs_int2str_dec(para->data.volume, para->volume_buf);
+			headbar_on_paint(p_msg, HB_PAINT_VOLUME);
+			return EPDK_OK;
+		}	
+		case HBAR_TEXT_PAINT:
+		{
+			headbar_on_paint(p_msg, HB_PAINT_TEXT);
+			return EPDK_OK;
+		}
+		case HBAR_HOME_PAINT:
+		{
+			headbar_on_paint(p_msg, HB_PAINT_HOME_BMP);
+			return EPDK_OK;
+		}
+		case HBAR_BACK_PAINT:
+		{	
+			headbar_on_paint(p_msg, HB_PAINT_BACK_BMP);
+			return EPDK_OK;
+		}
+		case HBAR_TIME_PAINT:
+		{
+			headbar_on_paint(p_msg, HB_PAINT_TIME);
+			return EPDK_OK;
+		}
+		case HBAR_WEATHER_PAINT:
+		{
+			headbar_on_paint(p_msg, HB_PAINT_WEATHER_BMP);
+			return EPDK_OK;
+		}
+		case HBAR_WIFI_PAINT:
+		{
+			headbar_ctl_t  *p_ctrl;
+			headbar_para_t *para;
+			p_ctrl = (headbar_ctl_t *)GUI_WinGetAttr(p_msg->h_deswin);
+			para   = &(p_ctrl->para);
+			para->wifi_signal = p_msg->dwAddData1;
+			headbar_on_paint(p_msg, HB_PAINT_WIFI_BMP);
+			return EPDK_OK;
+		}	
+		
+		case HBAR_WECHAT_MSSSGE:
+		{
+			headbar_ctl_t  *p_ctrl;
+			headbar_para_t *para;
+			__s32 real_time_speed = 0;
+			p_ctrl = (headbar_ctl_t *)GUI_WinGetAttr(p_msg->h_deswin);
+			para   = &(p_ctrl->para);
+			para->data.wechat_messge_num = p_msg->dwAddData1;
+			headbar_on_paint(p_msg, HB_PAINT_WECHAT_MESSGE);
+			return EPDK_OK;
+		}
+		
+		default:
+			break;
+	}
+
+	return GUI_FrmWinDefaultProc(p_msg);
+}
+
+H_WIN headbar_frm_create(H_WIN parent, H_LYR layer)
+{
+	H_WIN 							h_win;
+	__gui_framewincreate_para_t 	para;
+	eLIBs_memset(&para, 0, sizeof(__gui_framewincreate_para_t));
+	para.dwStyle          = WS_VISIBLE;
+	para.dwExStyle        = 0;
+	para.name			  = NULL;
+	para.hOwner			  = 0;
+	para.hHosting         = parent;
+	para.FrameWinProc     = cb_headbar_framewin;
+	para.id				  = HEADBAR_FRM_ID;
+	para.hLayer           = layer;
+	para.rect.x			  = headbar_uipara.hbar_frmwin.x;
+	para.rect.y			  = headbar_uipara.hbar_frmwin.y;
+	para.rect.width		  = headbar_uipara.hbar_frmwin.w;
+	para.rect.height	  = headbar_uipara.hbar_frmwin.h;
+	h_win = GUI_FrmWinCreate(&para);
+	if(!h_win)
+	{
+		__err("headbar frmwin create error ! \n");
+	}
+	return h_win;
+}
+
+__s32 headbar_frm_delete(H_WIN frmwin)
+{
+	if(frmwin)
+	{
+		GUI_FrmWinDelete(frmwin);
+	}
+
+	return EPDK_FAIL;
+}

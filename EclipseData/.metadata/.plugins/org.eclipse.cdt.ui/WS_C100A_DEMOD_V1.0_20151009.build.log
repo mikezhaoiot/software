@@ -1,0 +1,6 @@
+12:32:00 **** Build of configuration Debug for project WS_C100A_DEMOD_V1.0_20151009 ****
+make all 
+make:  makefile:  line 5:  Error -- Expecting macro or rule defn, found neither
+
+12:32:00 Build Finished (took 264ms)
+

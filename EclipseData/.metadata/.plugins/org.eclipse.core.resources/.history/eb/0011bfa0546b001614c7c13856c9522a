@@ -1,0 +1,26 @@
+
+#include "karaok_man_ui.h"
+
+static karaok_man_uipara_t uipara_800_480 =
+{
+	1,
+	{
+		0, 260, 800, 220
+	},
+	{
+		336, 260, 128, 128
+	},
+	{
+		0, 0, 128, 128,
+		ID_MOVIE_TP_VOLUME_BMP
+	},
+	{
+		0, 0, 128, 128,
+		ID_MOVIE_TP_BRIGHT_BMP
+	}
+};
+
+karaok_man_uipara_t *karaok_man_get_uipara(__s32 rotate)
+{
+	return &uipara_800_480;
+}

@@ -1,0 +1,104 @@
+/*
+**************************************************************************************************************
+*											         ePDK
+*						            the Easy Portable/Player Develop Kits
+*									           desktop system
+*
+*						        	 (c) Copyright 2007-2010, ANDY, China
+*											 All Rights Reserved
+*
+* File    	:app_movie.h
+* By      	: Bayden.chen
+* Func		:
+* Version	: v1.0
+* ============================================================================================================
+* 2011-05-05   Bayden.chen  create this file, implements the fundemental interface;
+**************************************************************************************************************
+*/
+#ifndef __APP_MOVIE_H__
+#define __APP_MOVIE_H__
+
+#include "beetles_app.h"
+#include "common/common.h"
+#include "spsc/spsc_man.h"
+#include "sub_show/sub_show.h"
+
+#define	MOVIE_SPSC_ID			   0x10
+#define MOVIE_SUB_SHOW_ID		   0x11
+#define MOVIE_SUB_SET_ID		   0x20
+#define MOVIE_PROG_ID       	   0x40
+#define MOVIE_BREAKPLAY_DIALOG_ID  0x80
+#define MOVIE_PLAYERROR_DIALOG_ID  0x100
+#define MOVIE_PLAYEND_DIALOG_ID	   0x200
+#define MOVIE_SSET_ID			   0x400
+#define	MOVIE_SUB_SCENE_TYPE_ALL   (MOVIE_SPSC_ID|MOVIE_SUB_SHOW_ID|MOVIE_SUB_SET_ID\
+                                      |MOVIE_PROG_ID|MOVIE_BREAKPLAY_DIALOG_ID|MOVIE_PLAYERROR_DIALOG_ID|MOVIE_PLAYEND_DIALOG_ID)
+
+#define	MOVIE_SUB_SCENE_TYPE_OTHER (MOVIE_SUB_SCENE_TYPE_ALL&(~MOVIE_SPSC_ID)&(~MOVIE_SUB_SHOW_ID))
+
+typedef struct movie_icon_data_s
+{
+	__u32 res_id;
+	HTHEME res_handle;
+	void *res_buffer;
+} movie_icon_data_t;									//icon data struct
+
+
+typedef struct
+{
+
+	void *spsc_scene;
+	void *volume_scene;
+	void *bright_scene;
+	void *playsta_scene;
+	void *sub_show_scene;
+	void *sub_set_scene;
+
+	__u32 sub_state;
+	__u32 sub_pos;
+	__u32 sub_color;
+	__u32 sub_size;
+	__u32 sub_stream;
+
+	H_WIN breakplay_scene;
+	H_WIN playerror_scene;
+	H_WIN playend_scene;
+	H_WIN movie_manager;
+	H_WIN h_deswin;
+	ES_FILE *hdisp;
+	__hdle	 hvedio_lyr;
+	H_LYR 	vol_bri_layer;	//滑动音量、亮度图层；
+	HTHEME  volume_bmp;
+	void    *volume_bmp_buf;
+	char 	volume_buf[32];
+	H_LYR 	bright_layer;//滑动调节音量图层
+	HTHEME  bright_bmp;
+	void    *bright_bmp_buf;
+	char 	bright_buf[32];
+	__u8	 auto_play_timmer_id;
+	__bool   exit_movie;	//是否退出movie
+	__s32    err_cnt;		//播放错误的文件个数
+	__s32    rr_flag;		//是否进行了快退操作，用于快退到尽头时，做判断用
+
+	__s32 stop_cnt ;//连续stop_cnt次检测到stop，才播下一首，防止还没播起来就跳到下一首
+	__s32 cur_stop_cnt;
+	__s32 cur_time;//记录当前播放时间，用于制造一个视频断点信息
+	char  cur_playing_file[RAT_MAX_FULL_PATH_LEN + 1];
+	__bool quit_by_fs_part_plug_out;//如果退出movie了，是否拔卡造成的退出
+	__u8 auto_flush_timmer_id;
+	__s32 btv_out;
+	H_LYR	m_hLyr_ff_fb;	// 显示快进、快退提示界面
+	__s16	m_ff_fb_speed;
+}movie_ctrl_t;
+
+H_WIN app_movie_create(root_para_t *para);
+__s32 app_movie_notify_delete_sub_scene(H_WIN hmanwin);
+__s32 app_movie_notify_delete_sub_dlg_scene(H_WIN hmanwin);
+
+static __s32 movie_playend_scene_create(movie_ctrl_t *movie_ctrl);
+static __s32 movie_has_sub_scene(movie_ctrl_t *movie_ctrl, __u32 sub_id);
+static __s32 movie_delete_subscene_by_id(movie_ctrl_t *movie_ctrl, __u32 sub_id);
+static __s32 movie_playerror_scene_create(movie_ctrl_t *movie_ctrl);
+static __s32 movie_save_breakpoint_info(movie_ctrl_t *movie_ctrl);
+
+#endif

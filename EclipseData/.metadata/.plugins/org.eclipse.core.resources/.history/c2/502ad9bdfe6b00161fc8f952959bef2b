@@ -1,0 +1,576 @@
+/*
+**************************************************************************************************************
+*											         ePDK
+*						            the Easy Portable/Player Develop Kits
+*									           desktop system
+*
+* File    	: 	music_player.h
+*
+* By      	: 	Libaiao
+* Func	:
+* Version	: 	v1.0
+* ============================================================================================================
+* 2010-5-3 15:24:52  Libaiao  create this file, implements the fundemental interface;
+**************************************************************************************************************
+*/
+
+
+#include "beetles_app.h"
+#include "music.h"
+#include "music_ui.h"
+#include "music_list.h"
+#include "music_player.h"
+#include "player_face.h"
+
+
+
+
+
+
+//***********************************************************************************
+//以下以status结束的函数名，都属于Headbar范围内
+
+
+__s32 DrawMusicPlayModeStatus(rat_play_mode_e mode)
+{
+	void *pic_buf = NULL;
+	music_headbar_ui_t *headbar_ui;
+	headbar_ui = music_get_headbar_ui_param();
+	switch(mode)
+	{	
+		case RAT_PLAY_MODE_SEQUENCE:
+		{
+			pic_buf = music_get_icon_res(ID_MUSIC_PLAY_ALL_STATUS_ICON);
+			break;
+		}
+		case RAT_PLAY_MODE_RANDOM:
+		{
+			pic_buf = music_get_icon_res(ID_MUSIC_PLAY_RANDOM_STATUS_ICON);
+			break;
+		}
+		case RAT_PLAY_MODE_ONLY_ONCE:
+		{
+			pic_buf = music_get_icon_res(ID_MUSIC_PLAY_ONE_STATUS_ICON);	
+			break;
+		}
+		case RAT_PLAY_MODE_ROTATE_ALL:
+			pic_buf = music_get_icon_res(ID_MUSIC_REPEAT_ALL_STATUS_ICON);
+			break;
+
+		case RAT_PLAY_MODE_ROTATE_ONE:
+		{
+			pic_buf = music_get_icon_res(ID_MUSIC_REPEAT_ONE_STATUS_ICON);
+			break;
+		}
+		default:
+			pic_buf = music_get_icon_res(ID_MUSIC_PLAY_ALL_STATUS_ICON);
+			break;
+	}
+	if(pic_buf != NULL)
+	{
+		GUI_BMP_Draw(pic_buf,headbar_ui->play_mode_rect.x,headbar_ui->play_mode_rect.y);
+	}
+
+	return EPDK_OK;
+}
+
+//根据EQ Mode在HeaderBar显示对应的状态icon
+__s32 DrawMusicEQModeStatus(music_player_ctrl_t *this)
+{
+	void *pic_buf = NULL;
+	__s32 X = 0, Y = 0;
+	music_headbar_ui_t *headbar_ui;
+	headbar_ui = music_get_headbar_ui_param();
+	X = headbar_ui->EQ_mode_rect.x;
+	Y = headbar_ui->EQ_mode_rect.y;
+	switch(this->EQ_mode)
+	{
+		case MUSIC_EQ_NORMAL:
+			pic_buf = music_get_icon_res(ID_MUSIC_NORMAL_STATUS_ICON);
+			break;
+
+		case MUSIC_EQ_CLASSIC:
+			pic_buf = music_get_icon_res(ID_MUSIC_CLASSIC_STATUS_ICON);
+			break;
+
+		case MUSIC_EQ_ROCK:
+			pic_buf = music_get_icon_res(ID_MUSIC_ROCK_STATUS_ICON);
+			break;
+
+		case MUSIC_EQ_JAZZ:
+			pic_buf = music_get_icon_res(ID_MUSIC_JAZZ_STATUS_ICON);
+			break;
+
+		case MUSIC_EQ_POP:
+			pic_buf = music_get_icon_res(ID_MUSIC_POP_STATUS_ICON);
+			break;
+	}
+
+	if(pic_buf != NULL)
+	{
+		GUI_SetDrawMode(GUI_DRAWMODE_TRANS);
+		GUI_BMP_Draw(pic_buf, X, Y);
+	}
+
+	return EPDK_OK;
+}
+
+
+
+
+
+__s32 DrawMusicHeadbar(music_player_ctrl_t *player_ctrl)
+{
+	DrawMusicPlayModeStatus(player_ctrl->play_mode);
+	DrawMusicEQModeStatus(player_ctrl);
+	return EPDK_OK;
+}
+
+
+__s32 DrawMsicButtonHintText(__s32 TextID)
+{
+	GUI_RECT text_rect;
+	music_palyer_ui_t *player_ui;
+	char TextBuf[64];
+	player_ui = music_get_player_ui_param();
+	text_rect.x0 = player_ui->btn_hint_rect.x;
+	text_rect.y0 = player_ui->btn_hint_rect.y;
+	text_rect.x1 = player_ui->btn_hint_rect.x + player_ui->btn_hint_rect.width - 1;
+	text_rect.y1 = player_ui->btn_hint_rect.y + player_ui->btn_hint_rect.height - 1;
+	GUI_SetBkColor(0x00000000);
+	GUI_SetColor(GUI_LLIGHTGRAY);
+	GUI_ClearRect(text_rect.x0, text_rect.y0, text_rect.x1, text_rect.y1);
+	get_menu_text(TextID, TextBuf, sizeof(TextBuf));
+	GUI_UC_SetEncodeUTF8();
+	GUI_DispStringInRect(TextBuf, &text_rect, GUI_TA_HCENTER| GUI_TA_VCENTER);
+	return EPDK_OK;
+}
+__s32 CleanMusicButtonHintText(void)
+{
+	GUI_RECT text_rect;
+	music_palyer_ui_t *player_ui;
+	//char TextBuf[64];
+	player_ui = music_get_player_ui_param();
+	text_rect.x0 = player_ui->btn_hint_rect.x;
+	text_rect.y0 = player_ui->btn_hint_rect.y;
+	text_rect.x1 = player_ui->btn_hint_rect.x + player_ui->btn_hint_rect.width;
+	text_rect.y1 = player_ui->btn_hint_rect.y + player_ui->btn_hint_rect.height;
+	GUI_ClearRect(text_rect.x0, text_rect.y0, text_rect.x1-20, text_rect.y1);
+	return EPDK_OK;
+}
+__s32 DrawMusicPlayModeButton(rat_play_mode_e mode, music_btn_status_e status)
+{
+	void *pic_buf = NULL;
+	music_palyer_ui_t *player_ui  = NULL;
+	music_ctrl_t	  *music_ctrl = NULL;
+	music_ctrl = (music_ctrl_t *)GUI_WinGetAttr(GUI_WinGetHandFromName(APP_MUSIC));
+	player_ui  = music_get_player_ui_param();	
+	GUI_LyrWinSel(music_ctrl->music_layer);
+	switch(mode)
+	{
+		case RAT_PLAY_MODE_ROTATE_ONE:
+		{
+			if(status == FOCUSED)
+			{
+				pic_buf = music_get_icon_res(ID_MUSIC_REPEAT_ONE_BTN_FOCUSED_ICON);
+			}
+			else if(status == UNFOCUSED)
+			{
+				pic_buf = music_get_icon_res(ID_MUSIC_REPEAT_ONE_BTN_UNFOCUSED_ICON);
+			}
+			else if(status == PRESSED)
+			{
+				pic_buf = music_get_icon_res(ID_MUSIC_REPEAT_ONE_BTN_UNFOCUSED_ICON);
+			}
+			DrawMsicButtonHintText(STRING_MUSIC_PLAY_ROTATE_ONE);
+			break;
+		}
+		case RAT_PLAY_MODE_SEQUENCE:
+		{
+			if(status == FOCUSED)
+			{
+				pic_buf = music_get_icon_res(ID_MUSIC_PLAY_ALL_BTN_FOCUSED_ICON);
+			}
+			else if(status == UNFOCUSED)
+			{
+				pic_buf = music_get_icon_res(ID_MUSIC_PLAY_ALL_BTN_UNFOCUSED_ICON);
+			}
+			else if(status == PRESSED)
+			{
+				pic_buf = music_get_icon_res(ID_MUSIC_PLAY_ALL_BTN_PRESSED_ICON);
+			}
+			DrawMsicButtonHintText(STRING_MUSIC_PLAY_SEQUENCE);
+			break;
+		}
+		case RAT_PLAY_MODE_RANDOM:
+		{
+			if(status == FOCUSED)
+			{
+				pic_buf = music_get_icon_res(ID_MUSIC_PLAY_RANDOM_BTN_FOCUSED_ICON);
+			}
+			else if(status == UNFOCUSED)
+			{
+				pic_buf = music_get_icon_res(ID_MUSIC_PLAY_RANDOM_BTN_UNFOCUSED_ICON);
+			}
+			else if(status == PRESSED)
+			{
+				pic_buf = music_get_icon_res(ID_MUSIC_PLAY_RANDOM_BTN_PRESSED_ICON);
+			}
+
+			DrawMsicButtonHintText(STRING_MUSIC_PLAY_RANDOM);
+			break;
+		}
+		default:
+			break;
+	}
+	if(pic_buf != NULL)
+	{
+		GUI_BMP_Draw(pic_buf,player_ui->play_mode_btn_rect.x, player_ui->play_mode_btn_rect.y);
+	}
+	return EPDK_OK;
+}
+
+
+__s32 DrawMusicEQModeButton(music_EQ_mode_e mode, music_btn_status_e status)
+{
+	void *pic_buf = NULL;
+	music_palyer_ui_t *player_ui  = NULL;
+	music_ctrl_t	  *music_ctrl = NULL;
+	music_ctrl = (music_ctrl_t *)GUI_WinGetAttr(GUI_WinGetHandFromName(APP_MUSIC));
+	player_ui  = music_get_player_ui_param();	
+	GUI_LyrWinSel(music_ctrl->music_layer);
+	switch(mode)
+	{
+		case MUSIC_EQ_NORMAL:
+		{
+			if(status == FOCUSED)
+			{
+				pic_buf = music_get_icon_res(ID_MUSIC_EQ_NORMAL_FOCUSED_ICON);
+			}
+			else if(status == UNFOCUSED)
+			{
+				pic_buf = music_get_icon_res(ID_MUSIC_EQ_NORMAL_UNFOCUSED_ICON);
+			}
+			else if(status == PRESSED)
+			{
+				pic_buf = music_get_icon_res(ID_MUSIC_EQ_NORMAL_PRESSED_ICON);
+			}
+			DrawMsicButtonHintText(STRING_MUSIC_EQ_NORMAL);
+			break;
+		}
+		case MUSIC_EQ_POP:
+		{
+			if(status == FOCUSED)
+			{
+				pic_buf = music_get_icon_res(ID_MUSIC_EQ_POP_FOCUSED_ICON);
+			}
+			else if(status == UNFOCUSED)
+			{
+				pic_buf = music_get_icon_res(ID_MUSIC_EQ_POP_UNFOCUSED_ICON);
+			}
+			else if(status == PRESSED)
+			{
+				pic_buf = music_get_icon_res(ID_MUSIC_EQ_POP_PRESSED_ICON);
+			}
+			DrawMsicButtonHintText(STRING_MUSIC_EQ_POP);
+			break;
+		}
+		case MUSIC_EQ_ROCK:
+		{
+			if(status == FOCUSED)
+			{
+				pic_buf = music_get_icon_res(ID_MUSIC_EQ_ROCK_FOCUSED_ICON);
+			}
+			else if(status == UNFOCUSED)
+			{
+				pic_buf = music_get_icon_res(ID_MUSIC_EQ_ROCK_UNFOCUSED_ICON);
+			}
+			else if(status == PRESSED)
+			{
+				pic_buf = music_get_icon_res(ID_MUSIC_EQ_ROCK_PRESSED_ICON);
+			}
+			DrawMsicButtonHintText(STRING_MUSIC_EQ_ROCK);
+			break;
+		}
+		default:
+			break;
+	}
+	if(pic_buf != NULL)
+	{
+		GUI_BMP_Draw(pic_buf,player_ui->BLight_btn_rect.x,player_ui->BLight_btn_rect.y);
+	}
+	return EPDK_OK;
+}
+
+__s32 DrawMusicPlayPauseButton(music_btn_status_e status)
+{
+	void *pic_buf = NULL;
+	__s32 X = 0, Y = 0;
+	music_palyer_ui_t *player_ui;
+	player_ui = music_get_player_ui_param();
+	X = player_ui->play_pause_btn_rect.x;
+	Y = player_ui->play_pause_btn_rect.y;
+
+	if(status == FOCUSED)
+	{
+		pic_buf = music_get_icon_res(ID_MUSIC_PLAY_PAUSE_BTN_FOCUSED_ICON);
+	}
+	else if(status == UNFOCUSED)
+	{
+		pic_buf = music_get_icon_res(ID_MUSIC_PLAY_PAUSE_BTN_UNFOCUSED_ICON);
+	}
+	else if(status == PRESSED)
+	{
+		pic_buf = music_get_icon_res(ID_MUSIC_PLAY_PAUSE_BTN_PRESSED_ICON);
+	}
+
+	DrawMsicButtonHintText(STRING_MUSIC_PLAY_PAUSE);
+
+	if(pic_buf != NULL)
+	{
+		GUI_BMP_Draw(pic_buf, X, Y);
+	}
+
+	return EPDK_OK;
+}
+
+
+//绘制play backward button, focused or not
+
+
+
+
+//绘制play backward button, focused or not
+
+
+__s32 DrawMusicPlayStatusButton(music_play_status_e status)
+{
+	void *pic_buf = NULL;
+	music_palyer_ui_t *player_ui;
+	player_ui = music_get_player_ui_param();
+	if(status == MUSIC_PLAY)
+	{
+		pic_buf = music_get_icon_res(ID_MUSIC_PALYING_STATUS_ICON);
+	}
+	else if(status == MUSIC_PAUSE)
+	{
+		pic_buf = music_get_icon_res(ID_MUSIC_PAUSE_STATUS_ICON);
+	}
+	if(pic_buf != NULL)
+	{
+		GUI_BMP_Draw(pic_buf,player_ui->play_status_rect.x,player_ui->play_status_rect.y);
+	}
+	return EPDK_OK;
+}
+
+
+//显示当前播放时间
+__s32 DrawMusicPlayingTime(__u32 time)
+{
+	GUI_RECT text_rect;
+	char time_text[20];
+	music_palyer_ui_t *player_ui;
+	player_ui = music_get_player_ui_param();
+	text_rect.x0 = player_ui->play_time.x;
+	text_rect.y0 = player_ui->play_time.y;
+	text_rect.x1 = player_ui->play_time.x + player_ui->play_time.width;
+	text_rect.y1 = player_ui->play_time.y + player_ui->play_time.height;
+	MusicSetTransColor();
+	GUI_ClearRect(text_rect.x0, text_rect.y0, text_rect.x1, text_rect.y1);
+	eLIBs_memset(time_text, 0 , sizeof(time_text));
+	time2str_by_format(time, time_text, TIME_AUTO_HMS);
+	GUI_DispStringInRect(time_text, &text_rect, GUI_TA_VCENTER);
+	return EPDK_OK;
+}
+
+__s32 CleanMusicTotalTime(void)
+{
+	GUI_RECT text_rect;
+	music_palyer_ui_t *player_ui;
+	player_ui = music_get_player_ui_param();
+	text_rect.x0 = player_ui->total_time.x;
+	text_rect.y0 = player_ui->total_time.y;
+	text_rect.x1 = player_ui->total_time.x + player_ui->total_time.width;
+	text_rect.y1 = player_ui->total_time.y + player_ui->total_time.height;
+	MusicSetTransColor();
+	GUI_ClearRect(text_rect.x0, text_rect.y0, text_rect.x1, text_rect.y1);
+	return EPDK_OK;
+}
+//显示音乐播放总时间
+__s32 DrawMusicTotalTime(__u32 time)
+{
+	GUI_RECT text_rect;
+	char time_text[20];
+	music_palyer_ui_t *player_ui;
+	player_ui = music_get_player_ui_param();
+	text_rect.x0 = player_ui->total_time.x;
+	text_rect.y0 = player_ui->total_time.y;
+	text_rect.x1 = player_ui->total_time.x + player_ui->total_time.width;
+	text_rect.y1 = player_ui->total_time.y + player_ui->total_time.height;
+	MusicSetTransColor();
+	GUI_ClearRect(text_rect.x0, text_rect.y0, text_rect.x1, text_rect.y1);
+	eLIBs_memset(time_text, 0 , sizeof(time_text));
+	//time2str(time, time_text);
+	time2str_by_format(time, time_text, TIME_AUTO_HMS);
+	GUI_DispStringInRect(time_text, &text_rect, GUI_TA_VCENTER);
+	return EPDK_OK;
+}
+
+//只画进度点，不画背景条
+
+
+__s32 DrawMusicProgressBarPoint(__u32 total, __u32 cur_value)
+{
+	void *pic_buf = NULL;
+	__s32 X = 0, Y = 0, BodyWidth = 0, PointWidth = 0;
+	music_palyer_ui_t *player_ui;
+	__u32 total_pieces = 0;
+	__u32 average = 0;
+	__u32 point = 0, i = 0;
+	__here__;
+	player_ui = music_get_player_ui_param();
+	__here__;
+	if((total == 0) || (cur_value == 0))
+	{
+		__here__;
+		X = player_ui->process_bar_body_rect.x;
+		Y = player_ui->process_bar_body_rect.y;
+		pic_buf = music_get_icon_res(ID_MUSIC_PROCESS_BAR_BODY_ICON);
+		GUI_BMP_Draw(pic_buf, X, Y);
+		return EPDK_OK;						//没有任何进度
+	}
+	__here__;
+	BodyWidth = player_ui->process_bar_body_rect.width;
+	PointWidth = player_ui->process_bar_point_rect.width;
+	total_pieces = BodyWidth / PointWidth;
+	{
+		__u32 cnt = 0, len = 0;
+		__s16 offsetX = 0, offsetY = 0;
+
+		if(cur_value >= total)
+		{
+			cur_value = total - 1;
+		}
+
+		len = (cur_value * total_pieces) / total;
+		//__log("len  cnt++------------%d\n", len);
+		if(cnt == 0)
+		{
+			X = player_ui->process_bar_head_rect.x;
+			Y = player_ui->process_bar_head_rect.y;
+			pic_buf = music_get_icon_res(ID_MUSIC_PROCESS_BAR_HEAD_ICON);
+
+			if(pic_buf != NULL)
+			{
+				GUI_BMP_Draw(pic_buf, X, Y);
+			}
+
+			X += PointWidth;
+			pic_buf = music_get_icon_res(ID_MUSIC_PROCESS_BAR_POINT_TAIL_ICON);
+
+			if(pic_buf != NULL)
+			{
+				GUI_BMP_Draw(pic_buf, X, Y);
+			}
+			X += PointWidth;
+		}
+		for(cnt = 1; cnt < len; cnt++)
+		{
+			pic_buf = music_get_icon_res(ID_MUSIC_PROCESS_BAR_POINT_ICON);
+			GUI_BMP_Draw(pic_buf, X-7, Y);
+			pic_buf = music_get_icon_res(ID_MUSIC_PROCESS_BAR_POINT_TAIL_ICON);
+			GUI_BMP_Draw(pic_buf, X, Y);
+			X += PointWidth;
+			//__log("X++------------%d\n", X);
+		}
+		if(cnt == total_pieces - 1)
+		{
+			//__log("end\n");
+			X -= PointWidth;
+			X = 738;
+			pic_buf = music_get_icon_res(ID_MUSIC_PROCESS_BAR_POINT_ICON);
+			GUI_BMP_Draw(pic_buf, X, Y);
+			X = player_ui->process_bar_tail_rect.x-1;
+			Y = player_ui->process_bar_tail_rect.y;
+			pic_buf = music_get_icon_res(ID_MUSIC_PROCESS_BAR_TAIL_ICON);
+			GUI_BMP_Draw(pic_buf, X, Y);
+		}
+	}
+	return EPDK_OK;
+}
+
+__s32 DrawMusicProgressBar(__u32 total, __u32 cur_value)
+{
+	void *pic_buf = NULL;
+	__s32 X = 0, Y = 0;
+	music_palyer_ui_t *player_ui;
+	player_ui = music_get_player_ui_param();
+	X = player_ui->process_bar_body_rect.x;
+	Y = player_ui->process_bar_body_rect.y;
+	pic_buf = music_get_icon_res(ID_MUSIC_PROCESS_BAR_BODY_ICON);
+	if(pic_buf != NULL)
+	{
+		GUI_BMP_Draw(pic_buf, X, Y);
+	}
+	if((total == 0) || (cur_value == 0))
+	{
+		return EPDK_OK;						
+	}
+	DrawMusicProgressBarPoint(total, cur_value);
+	return EPDK_OK;
+}
+
+
+
+
+
+
+
+
+__s32 DrawMusicPlayerContrlButtonByID(music_player_ctrl_t *this, __s32 menu_id, music_btn_status_e status)
+{
+	switch(menu_id)
+	{
+		case SET_PLAY_MODE:
+			DrawMusicPlayModeButton(this->play_mode, status);
+			break;
+
+		case SET_EQ_MODE:
+			DrawMusicEQModeButton(this->EQ_mode, status);
+			break;
+	}
+	return EPDK_OK;
+}
+
+
+__s32 ClearMusicPlayerContrlButtonBG(void)
+{
+	GUI_RECT BG_rect;
+	music_palyer_ui_t *player_ui;
+	player_ui = music_get_player_ui_param();
+	BG_rect.x0 = player_ui->contrl_BG_rect.x;
+	BG_rect.y0 = player_ui->contrl_BG_rect.y;
+	BG_rect.x1 = player_ui->contrl_BG_rect.x + player_ui->contrl_BG_rect.width;
+	BG_rect.y1 = player_ui->contrl_BG_rect.y + player_ui->contrl_BG_rect.height;
+	CleanMusicButtonHintText();
+	return EPDK_OK;
+}
+//绘制所有控制按钮, unfocused status
+__s32 DrawMusicPlayerContrlButton(music_player_ctrl_t *this)
+{
+	ClearMusicPlayerContrlButtonBG();
+	DrawMusicPlayModeButton(this->play_mode, UNFOCUSED);
+	DrawMusicEQModeButton(this->EQ_mode, UNFOCUSED);
+	return EPDK_OK;
+}
+
+
+__s32 DrawMusicPlayer(music_player_ctrl_t *this)
+{
+	DrawMusicPlayerContrlButton(this);
+	DrawMusicPlayStatusButton(MUSIC_PLAY);
+	DrawMusicPlayingTime(0);
+	DrawMusicTotalTime(0);
+	DrawMusicProgressBar(0, 0);
+	return EPDK_OK;
+}

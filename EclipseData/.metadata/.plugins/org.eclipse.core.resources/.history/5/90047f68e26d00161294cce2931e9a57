@@ -1,0 +1,503 @@
+/*
+*********************************************************************************************************
+*											        ePDK
+*						            the Easy Portable/Player Develop Kits
+*									           ir key driver
+*
+*						        (c) Copyright 2006-2007, Steven.ZGJ China
+*											All	Rights Reserved
+*
+* File    : rocker_main.c
+* By      : Jerry
+* Version : V1.00
+*********************************************************************************************************
+*/
+
+#include "drv_rocker_i.h"
+#include "epdk.h"
+
+
+__rk_private_data_set_t     rk_private;
+static __s32 once_key=0;
+static __s32 i=0;
+static __s32 pw_pin=0;
+
+__bool get_value_key = EPDK_FALSE;
+__s32 cur_value_key = 0;
+
+#define    KEY_MAXVALUE       2600                //按键过滤最大值
+#define    KEY_OFFSETVALUE    100                //按键偏移最大值
+
+__s32  read_key_value(__s32 *data, __u32 cnt)
+{
+  __s32 i,j,k,key_value;
+   for(i=0;i<cnt-1;i++)
+  for(j=0;j<cnt-1-i;j++)
+  if(data[j]>data[j+1])
+   {
+     k=data[j];
+     data[j]=data[j+1];
+     data[j+1]=k;
+    }
+  key_value=data[1];
+  return key_value;
+}
+__s32  rk_default_cb(void * arg)            
+{
+    __ev_rk_msg_t * drv_rk_msg;
+	__s32 x_value,y_value,value_key=0;
+	__s32 value_x;
+	drv_rk_msg=(__ev_rk_msg_t*) arg;
+        x_value=drv_rk_msg->x_value;
+	  y_value=drv_rk_msg->y_value;
+      //__inf("x = %d , y = %d \n", x_value,y_value);
+     if((x_value==2047)&&(y_value==2047)&&(once_key==0))
+	 return 0;	
+   else if(x_value!=2047)
+    	{
+    	//  __inf("x_value=%d\n",x_value);
+    	 
+	  if(rk_private.times<3)
+	  {
+	   rk_private.times++;
+         rk_private.temp_x[i]=x_value;
+	   i++;
+	   __inf("x_value=%d\n",x_value);
+	   }
+	  else
+	 {
+	  rk_private.times=0;
+	  value_x=read_key_value(rk_private.temp_x,3);
+	   i=0;
+	  __inf("value_x=%d\n",value_x);
+         if((value_x>1)&&(value_x<30))
+         value_key=7;//KPAD_CLK;
+        else if((value_x>40)&&(value_x<130))
+         value_key=7;//KPAD_MODE;
+	  else if((value_x>180)&&(value_x<300))
+	  value_key=7;//KPAD_NUM7;        //LOUD
+	  else if((value_x>380)&&(value_x<510))
+	  value_key=7;//KPAD_MOVIE;
+	  else if((value_x>550)&&(value_x<700))
+	  value_key=7;//KPAD_MUTE;
+	  else if((value_x>750)&&(value_x<900))
+	  value_key=7;//KPAD_EQ;
+	  else if((value_x>950)&&(value_x<1300))
+	  value_key=7;//KPAD_MUSIC;
+         else 
+	   return 0;
+	  }
+	}
+	else if(y_value!=2047)
+        {
+         __inf("y_value=%d\n",y_value);
+         if((y_value>1)&&(y_value<50))
+	    value_key=7;//KPAD_NUM1;
+          else if((y_value>70)&&(y_value<130))
+	    value_key=7;//KPAD_NUM2;
+	   else if ((y_value>150)&&(y_value<200))
+	   value_key=7;//KPAD_NUM3;
+	   else if ((y_value>220)&&(y_value<300))
+	   value_key=7;//KPAD_NUM4;
+	   else if ((y_value>330)&&(y_value<410))
+	   value_key=7;//KPAD_NUM5;
+	   else if ((y_value>430)&&(y_value<510))
+	    value_key=7;//KPAD_NUM6;
+	   else if((y_value>550)&&(y_value<700))
+	  {
+	  value_key=7;//KPAD_BAND;
+	   //__inf("y_value=%d\n",y_value);
+	   }
+	   else if((y_value>750)&&(y_value<900))
+	  {
+	  value_key=7;//KPAD_PREV;
+	// __inf("prev_value=%d\n",y_value);
+	   }
+	   else if((y_value>950)&&(y_value<1100))
+	   {
+	   value_key=7;//KPAD_NEXT;
+	 // __inf("next_value=%d\n",y_value);
+	   }
+	   else if ((y_value>1150)&&(y_value<1390))
+	   {
+        //__inf("y_value=%d\n",y_value);
+	   value_key=7;//KPAD_SEL;
+	   	}
+	   else
+	   	return 0;
+	   
+	    }
+	
+	else
+           value_key=0;
+	     
+	    if( value_key!=0)
+	   {
+	  esINPUT_SendEvent(rocker_drv.p_input_dev,     EV_KEY, value_key, 1 );				
+																		
+            esINPUT_SendEvent(rocker_drv.p_input_dev, EV_SYN, SYN_REPORT, 0 ); 
+		     once_key=value_key;
+                  value_key=0;
+		  
+	          return 0;
+		}
+	   else if(once_key!=0)
+         {
+	esINPUT_SendEvent(rocker_drv.p_input_dev,     EV_KEY, once_key, 0 );				
+																		
+            esINPUT_SendEvent(rocker_drv.p_input_dev, EV_SYN, SYN_REPORT, 0 ); once_key=0; 
+		      
+		//__inf("up---\n");
+		}
+    
+    return 0;
+}
+
+void rk_send_key_message(__s32 key_pad, __s32 key_status)
+{
+
+    esINPUT_SendEvent(rocker_drv.p_input_dev,     EV_KEY, key_pad, key_status );				
+													
+    esINPUT_SendEvent(rocker_drv.p_input_dev, EV_SYN, SYN_REPORT, 0 ); 
+
+	return;
+}
+
+
+__s32 data_filter(__s32 *input, __s32  *output ,int arr_len)
+{
+	__s32 tmp,i,j,half,rec,len,k=0;
+	__s32 *data;
+	data=input;
+	i=arr_len;
+	for(i=0;i<arr_len-1;i++)
+		for(j=0;j<arr_len-i-1;j++)
+		{
+			if(data[j]>data[j+1])
+			{
+				tmp=data[j];
+				data[j]=data[j+1];
+				data[j+1]=tmp;
+			}
+		}
+	len = arr_len;
+	half=1;//(len-1)/2;
+	for(i=0;i<len;i++)
+	{
+		if(data[half]>data[i])
+			rec=data[half]-data[i];
+		else
+			rec=data[i]-data[half];
+		if(rec<KEY_OFFSETVALUE)
+		{
+			output[k]=data[i];
+			k++;
+		}
+	}
+	
+	return k;
+}
+
+
+
+__s32 get_x1_channe1_keypad(__s32 ad_data)
+{
+	int value_key = 0;
+	if(ad_data > KEY_MAXVALUE)
+	{
+		return 0;
+	}
+	
+	if((ad_data>=0)&&(ad_data<100))
+	{
+		value_key=KPAD_MENU;
+	}
+	else if((ad_data>=100)&&(ad_data<350))
+	{
+		value_key=KPAD_RETURN;
+	}
+	else if((ad_data>=350)&&(ad_data<600))
+	{
+		value_key=KPAD_MOVIE;
+	}
+	else if((ad_data>=600)&&(ad_data<900))
+	{
+		value_key=KPAD_MUSIC;
+	}
+	else if((ad_data>=900)&&(ad_data<1150))
+	{
+		value_key=KPAD_RECORD;
+	}
+	else if((ad_data>=1150)&&(ad_data<1450))
+	{
+		value_key=KPAD_RECORD;
+	}
+	else if((ad_data>=1450)&&(ad_data<1650))
+	{
+		value_key=KPAD_PHOTO;
+	}
+	else if((ad_data>=1650)&&(ad_data<1900))
+	{
+		value_key=KPAD_LEFT;
+	}
+	else if((ad_data>=2000)&&(ad_data<2150))	
+	{
+		value_key=KPAD_RIGHT;
+	}
+	else if((ad_data>=2150)&&(ad_data<KEY_MAXVALUE))
+	{
+		value_key=KPAD_ENTER;
+	}
+	else 
+	{
+		return 0;   
+	}
+
+	return value_key;
+} 
+
+
+__s32 get_x2_channe1_keypad(__s32 ad_data)
+{
+	 int value_key = 0;
+	 if(ad_data > KEY_MAXVALUE)
+	 {
+		 return 0;
+	 }
+	 //eLIBs_printf("----x2 data = %d---\n", ad_data); 
+	 if((ad_data>=0)&&(ad_data<100))
+	 { 
+		value_key=KPAD_KARAOKE;
+	 }
+	 else if((ad_data>=100)&&(ad_data<400)) 			
+	 {
+		 value_key = KPAD_LOCK; 
+	 }
+	 else if((ad_data>=400)&&(ad_data<600))
+	 {
+		 value_key = KPAD_WECHAT;
+	 }
+	 else if((ad_data>=600)&&(ad_data<900))
+	 {
+		 value_key= KPAD_NET_PLAY; 
+	 }
+	 else if((ad_data>=900)&&(ad_data<1200))
+	 {
+		 value_key=KPAD_RETURN;
+	 }
+	 else 
+	 {
+		 return 0;	 
+	 }
+	 return value_key;
+}
+__s32 get_y2_channe1_keypad(__s32 ad_data)
+{
+	int value_key = 0;
+	if(ad_data > KEY_MAXVALUE)
+	{
+		return 0;
+	}
+	//eLIBs_printf("----y2 data = %d---\n", ad_data); 
+	 if((ad_data>=0)&&(ad_data<100))
+	 { 
+		value_key=KPAD_LEFT;
+	 }
+	 else if((ad_data>=100)&&(ad_data<400)) 			
+	 {
+		 value_key = KPAD_RIGHT; 
+	 }
+	 else if((ad_data>=400)&&(ad_data<600))
+	 {
+		 value_key=KPAD_VOICEUP;
+	 }
+	 else if((ad_data>=600)&&(ad_data<900))
+	 {
+		 value_key=KPAD_VOICEDOWN; 
+	 }
+	 else if((ad_data>=900)&&(ad_data<1200))
+	 {
+		 value_key=KPAD_ENTER;
+	 }
+	else 
+	{
+		return 0;   
+	}
+	return value_key;
+}
+static void  rocker_data_task(void *p_arg)
+{
+	__s32           ret, ad_data, vaild_num = 0, sum;
+	__s32           num=0;
+
+	static int x1_key_down_flag = 0, x1_key_pad = 0;
+	static int x2_key_down_flag = 0, x2_key_pad = 0;
+	static int y2_key_down_flag = 0, y2_key_pad = 0;
+	__s32 databuf[8];
+
+	__u32 adchannel_set=RK_CHANNEL_X2;
+	RK_ClearFifo();
+	RK_SelectChannel(RK_CHANNEL_X2);
+	while(1)
+	{
+		if(esKRNL_TDelReq(OS_PRIO_SELF) == OS_TASK_DEL_REQ)
+		{
+			//杀线程;
+			esKRNL_TDel(OS_PRIO_SELF);
+		}
+		if(EPDK_FALSE == get_value_key)
+		{
+			switch(adchannel_set)
+			{
+				case RK_CHANNEL_X2:
+				{
+					
+					RK_ClearFifo();
+					RK_SelectChannel(RK_CHANNEL_X2);
+					ret = RK_QueryIntPending();
+					if(ret & RK_DATA_PENDING)
+					{
+						eLIBs_memset(rk_private.crt_y, 0, sizeof(rk_private.crt_y));
+						RK_GetData(rk_private.crt_y, 8);
+						RK_ClearIntPending(ret);
+						RK_ClearFifo();
+						eLIBs_memset(databuf, 0, sizeof(databuf));
+						vaild_num = 0 ;
+						vaild_num = data_filter(rk_private.crt_y,databuf, 8);
+						if (vaild_num < 3)
+							break;
+						sum = 0;
+						for(num = 0; num < vaild_num; num++)
+						{
+							sum +=databuf[num];
+						}
+						ad_data = sum / vaild_num;
+					//	eLIBs_printf("=2==data = %d \n",ad_data);
+						if((x2_key_down_flag == 0)&&(ad_data<KEY_MAXVALUE))
+						{
+							//eLIBs_printf("--x2\n");
+							x2_key_pad = get_x2_channe1_keypad(ad_data);
+				                    if(x2_key_pad != 0)
+				                    {		                        
+				                        x2_key_down_flag = 1;
+				                        rk_send_key_message(x2_key_pad, 1);        //down
+				                        break;
+				                    }
+						}
+						else if((x2_key_down_flag==1)&&(ad_data>KEY_MAXVALUE))
+						{
+							adchannel_set=RK_CHANNEL_Y1;
+							x2_key_down_flag = 0;
+							rk_send_key_message(x2_key_pad, 0);    
+							x2_key_pad=0;
+							break;
+						}
+						else if((x2_key_down_flag==0)&&(ad_data>KEY_MAXVALUE))
+						{
+							adchannel_set=RK_CHANNEL_Y1;
+						}
+					}
+				}
+				break;
+#if 0
+				case RK_CHANNEL_Y1:
+				{
+					
+					RK_ClearFifo();
+					RK_SelectChannel(RK_CHANNEL_Y1);
+					ret = RK_QueryIntPending();
+					if(ret & RK_DATA_PENDING)
+					{
+						eLIBs_memset(rk_private.crt_y, 0, sizeof(rk_private.crt_y));
+						RK_GetData(rk_private.crt_y, 8);
+						RK_ClearIntPending(ret);
+						RK_ClearFifo();
+						eLIBs_memset(databuf, 0, sizeof(databuf));
+						vaild_num = 0 ;
+						vaild_num = data_filter(rk_private.crt_y,databuf, 8);
+						if (vaild_num < 3)
+							break;
+						sum = 0;
+						for(num = 0; num < vaild_num; num++)
+						{
+							sum +=databuf[num];
+						}
+						ad_data = sum / vaild_num;
+						
+						if((y2_key_down_flag == 0)&&(ad_data<KEY_MAXVALUE))
+						{
+							y2_key_pad = get_y2_channe1_keypad(ad_data);
+				                    if(y2_key_pad != 0)
+				                    {		                        
+				                        y2_key_down_flag = 1;
+				                        rk_send_key_message(y2_key_pad, 1);        
+				                        break;
+				                    }
+						}
+						else if((y2_key_down_flag==1)&&(ad_data>KEY_MAXVALUE))
+						{
+							adchannel_set=RK_CHANNEL_X2;
+							y2_key_down_flag = 0;
+							rk_send_key_message(y2_key_pad, 0);    
+							y2_key_pad=0;
+							break;
+						}
+						else if((y2_key_down_flag==0)&&(ad_data>KEY_MAXVALUE))
+						{
+							adchannel_set=RK_CHANNEL_X2;
+						}
+					}
+				}
+				break;
+#endif				
+			}
+		}
+		else
+		{
+			RK_ClearFifo();
+			RK_SelectChannel(RK_CHANNEL_Y2);
+			ret = RK_QueryIntPending();
+			if(ret & RK_DATA_PENDING)
+			{
+				//eLIBs_memset(rk_private.crt_y, 0, sizeof(rk_private.crt_y));
+				RK_GetData(rk_private.crt_y, 1);
+				RK_ClearIntPending(ret);
+				RK_ClearFifo();
+				ad_data = rk_private.crt_y[0];
+				get_y2_channe1_keypad(ad_data);	
+				get_value_key = EPDK_FALSE;
+			}		
+			adchannel_set=RK_CHANNEL_X1;
+		}
+
+		esKRNL_TimeDly(4);
+	}
+}
+__s32 rocker_init(void)
+{
+	rocker_drv.rk_dev.cb    = rk_default_cb;
+	rocker_drv.rk_dev.cb_bk = rk_default_cb;
+
+	RK_Init();
+	RK_SetFifoDepth(RK_FIFO_DEPTH_08);
+	RK_SetSampleRate(RK_SAMPLE_RATE_16K);
+	rk_private.data_sem     = esKRNL_SemCreate(1);
+	rk_private.data_tid     = esKRNL_TCreate(rocker_data_task, 0, 0x8000, KRNL_priolevel1);
+	RK_EnableInt(RK_DATA_IRQ);
+
+	return EPDK_OK;
+}
+__s32 rocker_exit(void)
+{
+    __u8  err;
+    if(rk_private.data_tid)
+    {   
+        esKRNL_TDel(rk_private.data_tid);
+        esKRNL_TimeDly(4);
+    }
+    esKRNL_SemDel(rk_private.data_sem, OS_DEL_ALWAYS, &err);
+    RK_Exit();
+	esPINS_PinGrpRel(pw_pin, 0);
+    return EPDK_OK;
+}
+

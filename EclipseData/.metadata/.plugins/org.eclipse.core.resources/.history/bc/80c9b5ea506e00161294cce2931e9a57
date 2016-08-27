@@ -1,0 +1,358 @@
+/*
+*********************************************************************************************************
+*											        ePDK
+*						            the Easy Portable/Player Develop Kits
+*									           ir key driver
+*
+*						        (c) Copyright 2006-2007, Steven.ZGJ China
+*											All	Rights Reserved
+*
+* File    : rocker_main.c
+* By      : Jerry
+* Version : V1.00
+*********************************************************************************************************
+*/
+#include "drv_matrix_key_i.h"
+#include "drv_rocker_i.h"
+#include "epdk.h"
+
+static __s32 i = 0;
+static __s32 pw_pin = 0;
+
+__s32 g_getEchoLevel = 0;
+
+
+__s32 data_filter(__s32 *input, __s32  *output , int arr_len)
+{
+	__s32 tmp, i, j, half, rec, k = 0;
+	__s32 *data;
+	data = input;
+	i = arr_len;
+
+	for(i = 0; i < arr_len - 1; i++)
+		for(j = 0; j < arr_len - i - 1; j++)
+		{
+			if(data[j] > data[j + 1])
+			{
+				// ��С��������
+				tmp = data[j];
+				data[j] = data[j + 1];
+				data[j + 1] = tmp;
+			}
+		}
+
+	half = arr_len / 2;
+
+	for(i = 0; i < arr_len; i++)
+	{
+		if(data[half] > data[i])
+		{
+			rec = data[half] - data[i];
+		}
+		else
+		{
+			rec = data[i] - data[half];
+		}
+
+		if(rec < 30)	// ���ֵ
+		{
+			output[k] = data[i];
+			k++;
+		}
+	}
+
+	return k;
+}
+
+const __u16 gc_adKeyPadX1_tab[] =
+{
+	KPAD_SUBMENU,
+	KPAD_MENU,	
+	KPAD_MOVIE,
+	KPAD_MUSIC,
+	KPAD_FM,
+	KPAD_RECORD,
+	KPAD_PHOTO, 
+	KPAD_ENTER,
+	KPAD_LEFT,
+	KPAD_RIGHT,
+};
+const __u16 gc_adKeyPadX2_tab[] =
+{
+	KPAD_NUM1,
+	KPAD_NUM2,
+	KPAD_NUM3,
+	KPAD_NUM4,
+	KPAD_NUM5,
+	KPAD_NUM6,
+	KPAD_NUM7,
+	KPAD_NUM8,
+	KPAD_NUM9,
+	KPAD_NUM0,
+};
+
+#define KB_AD_STEP   140
+const S_KEYPAD_AD gc_sKeypadAD_type4[] =
+{
+	{0, 	KB_AD_STEP},
+	{338-KB_AD_STEP,	338+KB_AD_STEP},
+	{683-KB_AD_STEP,	683+KB_AD_STEP},
+	{1016-KB_AD_STEP,	1016+KB_AD_STEP},
+	{1365-KB_AD_STEP,	1365+KB_AD_STEP},
+	{1696-KB_AD_STEP,	1696+KB_AD_STEP},
+	{2027-KB_AD_STEP,	2027+KB_AD_STEP},
+	{2374-KB_AD_STEP,	2374+KB_AD_STEP},
+	{2721-KB_AD_STEP,	2721+KB_AD_STEP},
+	{3066-KB_AD_STEP,	3066+KB_AD_STEP},	
+	{3439-KB_AD_STEP,	3439+KB_AD_STEP},	
+	{3778-KB_AD_STEP,	3778+KB_AD_STEP},		
+};
+
+__s32 get_x1_channe1_keypad(__s32 ad_data)
+{
+	__s16 idx, valueKeyIdx = -1;
+	for(idx =0; idx <__SIZEOF(gc_sKeypadAD_type4); idx++)
+	{
+		if(gc_sKeypadAD_type4[idx].min <= ad_data && ad_data <= gc_sKeypadAD_type4[idx].max)
+		{
+			valueKeyIdx = idx;
+			break;
+		}
+	}	
+
+	if((0 <= valueKeyIdx) && (valueKeyIdx < __SIZEOF(gc_sKeypadAD_type4)))
+	{
+		return gc_adKeyPadX1_tab[valueKeyIdx];	// ע: ����˱����а�����ȱ���뽫������ӦKPADֵ��0x00��
+	}
+
+	return 0;
+}
+
+__s32 get_x2_channe1_keypad(__s32 ad_data)
+{
+	__s16 idx, valueKeyIdx = -1;
+	for(idx =0; idx <__SIZEOF(gc_sKeypadAD_type4); idx++)
+	{
+		if(gc_sKeypadAD_type4[idx].min <= ad_data && ad_data <= gc_sKeypadAD_type4[idx].max)
+		{
+			valueKeyIdx = idx;
+			break;
+		}
+	}	
+	if((0 <= valueKeyIdx) && (valueKeyIdx < __SIZEOF(gc_sKeypadAD_type4)))
+	{
+		return gc_adKeyPadX2_tab[valueKeyIdx];
+	}
+
+	return 0;
+}
+static __s32 read_multi_data(void)
+{
+		__s32 		 ret, ad_data, vaild_num, sum, num;
+
+		__s32 		 getAdBuf[2][8];
+
+		//��
+		eLIBs_memset(getAdBuf[0], 0, sizeof(getAdBuf));
+		RK_GetData(getAdBuf[0], 8); // ��ȡADֵ
+
+
+
+		//����
+		vaild_num = data_filter(getAdBuf[0], getAdBuf[1], 8);
+
+
+		//ȡƽ��
+		sum = 0;
+
+		for(num = 0; num < vaild_num; num++)
+		{
+			sum += getAdBuf[1][num];
+		}
+
+		ad_data = sum  / vaild_num;
+
+		
+
+		return ad_data;
+
+}
+
+
+static __u32		 s_adChannel = RK_CHANNEL_BEGIN +1;
+__u32  rocker_scan_tp(void)
+{
+	__s32		   ret, ad_data, vaild_num, sum, num;
+	__s32		   getAdBuf[2][8];
+	#define READ_NUM 3 //������ȡcnt��
+	__s32 val[READ_NUM]={0};
+	__s32 eff_data_num;
+	__s32 delay_num = 0;
+	__s32 min;
+
+	ret = RK_QueryIntPending();
+
+	if(ret & RK_DATA_PENDING)
+	{
+		eff_data_num = 0;
+		for(i = 0 ; i < READ_NUM ; i++)
+		{
+			val[i] = read_multi_data();
+			eff_data_num++;
+
+			if(val[i] > 4000)
+			{
+				//clear pend  clear fifo
+				RK_ClearIntPending(ret);
+				RK_ClearFifo();
+				goto NEXT_CHN;
+			}
+
+			//clear pend  clear fifo
+			RK_ClearIntPending(ret);
+			RK_ClearFifo();
+
+			//wait for data comming
+			delay_num = 0;
+			while(1)
+			{
+				delay_num++;
+				if(delay_num > 2)
+				{
+					break;
+				}
+				
+				ret = RK_QueryIntPending();
+
+				if(ret & RK_DATA_PENDING)
+				{
+					break;
+				}
+				esKRNL_TimeDly(1);
+			}
+
+			if(delay_num > 2)//û�ȵ�����
+			{
+				break;
+			}
+		}
+
+
+		//ȡƽ��
+		sum = 0;
+		min = 4096+1;
+
+		for(i = 0; i < eff_data_num; i++)
+		{
+			if(val[i] < min)
+			{
+				min = val[i];
+			}
+			sum += val[i];
+			//eLIBs_printf("val[%d]:%d, ", i, val[i]);
+		}
+		//eLIBs_printf("\n");
+
+		#if 0
+		ad_data = sum  / eff_data_num;
+		#else
+		ad_data = min;
+		#endif
+
+		switch(s_adChannel)
+		{
+			case RK_CHANNEL_X1 :
+			{
+				//__msg("X1:ad_data = %d\n", ad_data);
+                
+				ret = get_x1_channe1_keypad(ad_data);
+						
+				if(ret != 0)
+				{
+					return ret;
+				}
+				
+				break;
+			}
+
+			case RK_CHANNEL_X2 :
+			{
+				//__msg("X2:ad_data = %d\n", ad_data);
+
+				ret = get_x2_channe1_keypad(ad_data);
+
+				if(ret != 0)
+				{
+					return ret;
+				}
+
+				break;
+			}
+
+			case RK_CHANNEL_Y2 :
+			{
+				rocker_scan_tp_y2(ad_data);
+				break;
+			}
+
+			default :	break;
+		}
+
+NEXT_CHN:;
+		if(++s_adChannel >= RK_CHANNEL_RD)	s_adChannel = RK_CHANNEL_BEGIN +1;
+		
+		RK_SelectChannel(s_adChannel);
+		RK_ClearIntPending(RK_QueryIntPending());
+		RK_ClearFifo();
+	}
+
+	return 0;
+}
+
+__s32 rocker_init(void)
+{
+	if(RK_CHANNEL_BEGIN+1 >= RK_CHANNEL_RD)	return EPDK_FAIL;
+	
+	RK_Init();
+	RK_SetFifoDepth(RK_FIFO_DEPTH_08);
+	RK_SetSampleRate(RK_SAMPLE_RATE_16K);
+	RK_EnableInt(RK_DATA_IRQ);
+	RK_SelectChannel(s_adChannel);
+	RK_ClearIntPending(RK_QueryIntPending());
+	RK_ClearFifo();
+
+	__msg("enter init--------------------------------------------------------------\n");
+	return EPDK_OK;
+}
+/*
+****************************************************************************************************
+*
+*             rocker_exit
+*
+*  Description:
+*       rocker_exit
+*
+*  Parameters:
+*
+*  Return value:
+*       none
+*
+****************************************************************************************************
+*/
+__s32 rocker_exit(void)
+{
+#if 0
+	__u8  err;
+
+	if(rk_private.data_tid)
+	{
+		esKRNL_TDel(rk_private.data_tid);
+		esKRNL_TimeDly(4);
+	}
+
+	esKRNL_SemDel(rk_private.data_sem, OS_DEL_ALWAYS, &err);
+#endif
+	RK_Exit();
+	//   esPINS_PinGrpRel(pw_pin, 0);
+	return EPDK_OK;
+}

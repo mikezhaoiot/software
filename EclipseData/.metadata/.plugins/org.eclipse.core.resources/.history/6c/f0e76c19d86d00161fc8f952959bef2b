@@ -1,0 +1,340 @@
+
+#ifndef __BEETLES_APP_H_
+#define __BEETLES_APP_H_
+
+#include "apps.h"
+#include "lib/common/palette.h"
+#include "lib/common/misc.h"
+#include "lib/common/mem_dev.h"
+#include "lib/sset/toolbar/GlideCurve.h"
+#include "lib/sset/toolbar/tbar_com.h"
+#include "lib/sset/sset_e.h"
+#include "lib/sset/sset_uipara.h"
+#include "lib/app_dialog/app_dialog.h"
+#include "lib/app_loading/app_loading.h"
+#include "lib/fifo_db/fifo_db.h"
+//#include "lib/com_volume/com_volume.h"
+#include "lib/com_menu/com_menu.h"
+
+
+extern GUI_FONT *SWFFont;
+extern char g_strConnectedWifiName[64];
+extern char g_strConnectedWifiPsk[25];
+extern __krnl_event_t *wifi_control_sem;
+
+
+
+#if SP_DEV_HW_PW_OFF
+	#define MOVIE_AUTO_FLUSH_TIME 	(100*20*9)			
+	#define MUSIC_AUTO_FLUSH_TIME 	(100*60)		
+#else
+	#define MOVIE_AUTO_FLUSH_TIME   0		
+	#define MUSIC_AUTO_FLUSH_TIME   0		
+#endif
+#define MOVIE_AUTO_FLUSH_FIRST_TIME (200*5)		
+#define MUSIC_AUTO_FLUSH_FIRST_TIME	(200*5)		
+#define	RECORD_STATE_START			0		
+#define	RECORD_STATE_PAUSE			1		
+#define	RECORD_STATE_STOP			2		
+#define MASK_RootFlags_AuxMode_BT	(1<<3)
+#define MASK_RootLog__LastFs		(0x03<<0)
+#define OP_RootLog__LastFs_SD		1
+#define OP_RootLog__LastFs_UD		2
+#define _ARGB(A,R,G,B)				(((A)<<24)|((B)<<16)|((G)<<8)|((R)<<0))
+#define CONST_BackColor_Black		0xff000000		
+#define CONST_BackColor				CONST_BackColor_Black
+#define GUI_LLIGHTGRAY    			0xff202020 
+#define W_NumLock_Bg				240
+#define H_NumLock_Bg				120
+#define H_NumLock_Num				71
+#define W_Num						37
+#define H_Num						48
+#define TIMEOUT_ID_TIMER_DIGIT		400
+#define MAX_FF_FB_MULTI				3
+#define BOOT_FROM_SDMMC				0
+#define H_THEME 					HTHEME
+#define get_menu_text   			dsk_langres_get_menu_text
+#define get_menu_len   			 	dsk_langres_get_menu_len
+#define theme_open     			 	dsk_theme_open
+#define theme_hdl2buf   			dsk_theme_hdl2buf
+#define theme_hdl2size  			dsk_theme_hdl2size
+#define theme_close     			dsk_theme_close
+#define BEETLES_TBL_SIZE(a)	        (sizeof(a)/sizeof(a[0]))
+
+#define APP_ROOT		    "beetles"
+#define APP_HOME		    "app_home"
+#define APP_EXPLORER	    "app_explorer"
+#define APP_MOVIE		    "app_movie"
+#define APP_MUSIC		    "app_music"
+#define APP_PHOTO		    "app_photo"
+#define APP_SETTING		    "app_setting"
+#define APP_NETWORK_HOME 	"app_network_home"
+#define APP_WIFI	        "app_wifi"
+#define APP_OTA	            "app_ota"
+#define APP_WEATHER	        "app_weather"
+#define APP_NET_EXPLORER    "app_net_explorer"
+#define APP_NATIVE_EXPLORER	"app_native_explorer"
+#define APP_VOICE			"app_voice"
+#define APP_WECHAT_TEXT		"app_wechat_text"
+#define APP_KARAOK			"APP_KARAOK"
+#define APP_POINT_READ		"app_point_read"
+#define APP_PREAD_EXPLORER	"app_pread_explorer"
+#define APP_NATIVE			"app_native"
+
+#define APP_HOME_ID				 0x1001
+#define APP_EXPLORER_ID			 0x2001
+#define APP_MOVIE_ID			 0x3001
+#define APP_MUSIC_ID			 0x4001
+#define APP_PHOTO_ID			 0x5001
+#define APP_SETTING_ID			 0x7001
+#define APP_LOADING_ID			 0x9100
+#define APP_ROOT_ID 			 0x9400
+#define COM_VOLUME_ID            0x9500
+#define APP_WIFI_ID				 0xA201
+#define APP_NET_EXPLORER_ID		 0xA301
+#define APP_OTA_ID				 0xA401
+#define APP_WEATHER_ID			 0xA501
+#define APP_WECHAT_FLUSH_ID		 0xA601
+#define APP_NETWORK_HOME_ID 	 0XA701
+#define	APP_USB_CHARGE_ID		 0xA701
+#define	APP_NET_DOWN_ID	         0xA801
+#define APP_NATIVE_EXPLORER_ID	 0xA901
+#define PHOTO_WECHAT_SUB_MENU_ID 0xAA01
+#define APP_COM_DLG_ID           (APP_ROOT_ID+1)
+#define APP_WECHAT_TEXT_ID  	 (APP_ROOT_ID+2)	
+#define APP_KARAOK_ID			 (APP_ROOT_ID+3)	
+#define APP_COM_VOLUME_ID		 (APP_ROOT_ID+4)	
+#define APP_POINT_READ_ID		 0xB001
+#define APP_PREAD_EXPLORER_ID	 0xB002
+#define APP_NATIVE_ID			 0xAB01
+#define APP_CHECKMODE_ID         0xAB02
+
+
+
+typedef enum
+{
+  SWITCH_TO_OTHER_APP = 0,
+  SWITCH_TO_MMENU,
+  SWITCH_TO_EXPLORER,
+  OPEN_BG_MUSIC,
+  CLOSE_BG_MUSIC,
+  SWITCH_DISK,
+  CLOSE_AUDIO_APP,
+  SWITCH_TO_MODAL_DIALOG,
+} app2root_cmd_t;
+
+
+typedef enum                    
+{
+	ID_HOME_WIFI_PLAY=0,
+	ID_HOME_WECHAT,
+	ID_HOME_KARAOKE,	
+	ID_HOME_ERGE,
+	ID_HOME_TANGSHI,
+	ID_HOME_EXPLORER,	
+	ID_HOME_YINGYU,
+	ID_HOME_SHUXUE,
+	ID_HOME_DONGHAU,	
+	ID_HOME_GUOXUE,
+	ID_HOME_GUSHI,
+	ID_HOME_NATIVE,
+	ID_HOME_GENERAL_SETTING,	
+	ID_HOME_TIME_WEATHER,
+	ID_HOME_MOVIE,
+	ID_HOME_MUSIC,
+	ID_HOME_RECORD,
+	ID_HOME_PHOTO,
+	ID_MAX_NUM,
+	ID_HOME_OTHERS,
+	ID_HOME_ALARM,
+	ID_MUSIC_SHORTCUT,
+	ID_MOVIE_SHORTCUT,
+	ID_PHOTO_SHORTCUT,
+	ID_WECHAT_SHORTCUT,
+	ID_KARAOK_SHORTCUT,
+	ID_FM_SHORTCUT,
+	ID_WECHAT_VOICE,
+	ID_WECHAT_VIDEO,	
+	ID_WECHAT_REC,
+	ID_POINT_READ,
+	ID_HOME_CHECKMODE
+}root_home_id_t;
+
+
+typedef enum
+{
+  ID_EXPLORER_ALL = 0,
+  ID_EXPLORER_MOVIE,
+  ID_EXPLORER_PHOTO,
+  ID_EXPLORER_MUSIC,
+  ID_EXPLORER_FIRMWARE,
+  ID_EXPLORER_POINT_READ,
+  ID_EXPLORER_RESTORE,
+} root_explorer_id_t;
+
+typedef enum
+{
+  EXPLR_SW_TO_MAIN = 0,
+  EXPLR_SW_TO_MOVIE,
+  EXPLR_SW_TO_PHOTO,
+  EXPLR_SW_TO_MUSIC,
+  EXPLR_SW_TO_EBOOK,
+  EXPLR_SW_TO_KARAOKE,
+  EXPLR_SW_TO_POINT_READ,
+} explorer_sw_to_t;
+
+typedef enum
+{
+  SETTING_SW_TO_MAIN = 0,
+  SETTING_SW_TO_PROMPT_UPGRADE,
+  SETTING_SW_TO_PROMPT_DEFAULT,
+  EXPLR_SW_TO_UPGRADE,
+  SETTING_SW_TO_MULTIMEDIA,
+  SETTING_SW_TO_EXPLORER,
+  SETTING_SW_TO_POWER,
+} setting_sw_to_t;
+
+typedef enum
+{
+	WIFI_SW_TO_MAIN = 0,
+}wifi_sw_to_t;
+
+typedef enum
+{
+  MUSICPLAYER_NORMAL = 0,
+  MUSICPLAYER_BACKGROUND = 1,
+  MUSICPLAYER_BACKGROUND_HOME = 2,
+  MUSICPLAYER_MUSIC_PAUSE,
+  MUSICPLAYER_MUSIC_PLAY,
+} musicplayer_mode_e;
+
+typedef enum
+{
+	EXPLOROER_SW_TO_MAIN = 0,
+	EXPLOROER_SW_TO_PHOTO,
+	EXPLOROER_SW_TO_MOVIE,
+	EXPLOROER_SW_TO_VOICE,
+	EXPLOROER_SSW_TO_NATIVE,
+	EXPLOROER_SSW_TO_MOVIE,
+} exp_paly_to_t;
+
+typedef enum
+{
+	ROOT_SW_TO_MAIN = 0,
+	ROOT_SW_TO_PHOTO,
+	ROOT_SW_TO_MOVIE,
+	ROOT_SW_TO_VOICE,
+} root_paly_to_t;
+
+typedef enum
+{
+	gscene_hbar_wifi_unlink = 0,
+	gscene_hbar_wifi_link,
+}gscene_hbar_cmd_t;
+
+typedef enum
+{
+	exp_default= 0,
+	exp_wechat,
+	exp_native,
+}exp_back_exp_t;
+
+typedef enum 
+{
+	GUI_MSG_WIFI_PLAY_MAIN = 292,
+	GUI_MSG_WIFI_PLAY_WLRM = 451,
+	GUI_MSG_WIFI_PLAY_UNKNOW,
+}wifi_play_cmd_t;
+
+typedef enum
+{
+	GUI_MSG_WECHAT_PHOTO,
+	GUI_MSG_WECHAT_VOICE,
+	GUI_MSG_WECHAT_VIDEO,
+	GUI_MSG_WECHAT_BIND,
+	GUI_MSG_WECHAT_UBIND,
+	GUI_MSG_WECHAT_OTA,
+}wechat_cmd_t;
+
+typedef enum
+{
+  MOVIE_MODE_NORMAL = 0,
+  MOVIE_MODE_TV,
+  MOVIE_MODE_DESKTOP,
+} __movie_create_mode_e;
+
+typedef enum 
+{
+	EXPL_BOOT_GUOXUE = 0,
+	EXPL_BOOT_SHUXUE,
+	EXPL_BOOT_YINGYU,
+	EXPL_BOOT_TANGSHI,
+	EXPL_BOOT_DONGHUA,
+	EXPL_BOOT_ERGE,
+	EXPL_BOOT_GUSHI,
+	EXPL_BOOT_KALAOK,
+	EXPL_BOOT_WBCC,
+	EXPL_BOOT_SET,
+	EXPL_BOOT_WECHAT,
+	EXPL_BOOT_MUSIC,
+	EXPLORER_BOOT_U_DISK,
+	EXPL_BOOT_POINT_READ,
+	EXPL_BOOT_RESET = 0xff,
+}expl_boot_e;
+
+typedef struct expr_play_mode
+{
+	__u32 play_state;
+	__u32 wxp_wechat_msg;
+	__u32 save_len;
+	__u32 save_len_head;
+	HTHEME jpg_voice;
+	HTHEME jpg_head;
+	char *data_head;
+	char *data;
+	__u8 plugin;
+	__u8 linking;
+	H_WIN h_parent;
+	H_LYR h_lyr;
+	__u8	link_get_weather;
+	__bool	wechat_exit;
+	__u8	app_back_exp;
+	__u8	fist_bbc;
+	__u8    delete_wechat_text;
+} exp_play_mode_t;
+
+typedef struct tag_root_para
+{
+	GUI_FONT *font;
+	rat_root_t explr_root;
+	__movie_create_mode_e tv_mode;		
+	H_WIN h_parent;
+	H_WIN src_win;	
+	H_WIN h_fw_update_dlg;	
+	__u8  mic_flag;
+	__u32 root_type;	
+	__u32 Option;						//0 ��ݼ����� 1 �ļ�����������
+	__u32 setting_opt;					//Ϊ0����ͨ�����ã�Ϊ1�����Դ����
+	__u32 m_maskFlags;
+	__u32 wechat_contet_size[4];		// �ı���С���жϵ�ǰ�Ƿ���Ҫת��ת����
+	__u32 save_wechat_count;  			//��ǰ�����������Ϣ����
+	__u32 log;
+	__s32 data;
+	__s32 explorer_play_music;			//���ļ��������沥�����ֱ�־, 1 ��ʾ���ļ������в���
+	__s32 explorer_path;
+	__s32 photo_enter_mode;  			//0��ͨģʽ  //1 ΢��ģʽ
+	__s32 photo_auto_play_flag;  		//0  ���Զ�����  // 1 �Զ����� flag	
+	__s32 voice_enter_mode;  			//0  λֱ�Ӵ���������� 1 Ϊ�鿴����Ϣ����
+	__s32 wifi_cat_id;  				//��ʼ�������粥�ŵ�id;
+	char music_file_name[RAT_MAX_FULL_PATH_LEN];	
+	char fw_update_file_disk;			//�̼������ļ�����
+	char wechat_sendinfo[4][128];		//���浱ǰ�û�������ʱ��
+	char wechat_content[4][1024];		//��������֮ǰ����������
+	char pread_filename[RAT_MAX_FULL_PATH_LEN];
+	char pread_strkey[32];	
+} root_para_t	;
+#include "../setting/app_setting.h"
+
+extern __s32 app_tips_show(H_LYR lyrwin, __s32 str_id);
+#endif
+

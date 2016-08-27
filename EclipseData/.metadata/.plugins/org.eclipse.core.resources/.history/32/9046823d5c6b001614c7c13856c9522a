@@ -1,0 +1,103 @@
+/*
+**************************************************************************************************************
+*											         ePDK
+*						            the Easy Portable/Player Develop Kits
+*									           desktop system
+*
+*						        	 (c) Copyright 2007-2010, ANDY, China
+*											 All Rights Reserved
+*
+* File    	: spsc_man.h
+* By      	: Bayden.chen
+* Func		:
+* Version	: v1.0
+* ============================================================================================================
+* v  create this file
+**************************************************************************************************************
+*/
+
+#ifndef __KARAOK_MAN_H__
+#define __KARAOK_MAN_H__
+
+#include "beetles_app.h"
+#include "karaok_man_ui.h"
+
+
+typedef enum
+{
+	TRACK_ORIGINAL = 0,
+	TRACK_ACCOMPANY,
+	TRACK_INVALID
+	
+}track_mode;
+
+typedef enum
+{
+  man_scene_msg_timeout = 0,
+  man_scene_msg_brightset,
+  man_scene_msg_volumeset,
+  man_scene_msg_tvout,
+  man_scene_msg_rr,	
+  man_scene_msg_save_breakpoint_info,
+  man_scene_msg_exit,  
+  man_scene_msg_num
+} karaok_man_scene_msg_t;
+
+typedef enum
+{
+  karaok_man_scene_update_fileinfo = GUI_MSG_ + 1
+
+} karaok_man_scene_recv_msg_t;
+
+
+typedef struct
+{
+	H_WIN hparent;
+	__s32 scene_id;
+} karaok_man_create_para_t;
+
+typedef enum
+{
+  karaok_prog_scene_id,
+  karaok_man_scene_id_max
+} karaok_man_scene_id_t;
+
+typedef enum
+{
+  karaok_man_volume = 0,
+  karaok_man_bright
+} karaok_man_scene_id_t;
+
+typedef struct
+{
+	H_WIN hparent;
+	H_WIN man_manager;
+	H_WIN hfrm;
+	H_LYR hlyr;				
+	H_LYR icon_lyr;
+	HTHEME volume_bmp;
+	HTHEME bright_bmp;
+	void* volume_buf;
+	void* bright_buf;
+	void* prog_scene;
+	__s32 scene_id;
+	__u8  icon_flag;
+	__u8  man_hide_timmer_id;
+
+}karaok_man_scene_t;
+
+
+
+void *       karaok_man_scene_create(karaok_man_create_para_t *create_para);
+__s32        karaok_man_scene_delete(void *handle);
+static __s32 karaok_man_scene_proc(__gui_msg_t *msg);
+static H_LYR karaok_man_layer_create(RECT *rect, __s32 pipe);
+static __s32 karaok_man_install_hide_timmer(karaok_man_scene_t *scene_para);
+static __s32 karaok_man_reset_hide_timmer(karaok_man_scene_t *scene_para);
+static __s32 karaok_man_uninstall_hide_timmer(karaok_man_scene_t *scene_para);
+static __s32 karaok_man_prog_scene_create(karaok_man_scene_t *scene_para);
+__s32        karaok_man_prog_scene_delete(karaok_man_scene_t *scene_para);
+static __s32 karaok_man_scene_proc(__gui_msg_t *msg);
+__s32        karaok_man_scene_LyMove(void *handle,__s32 Move_X,__s32 Move_Y);
+
+#endif

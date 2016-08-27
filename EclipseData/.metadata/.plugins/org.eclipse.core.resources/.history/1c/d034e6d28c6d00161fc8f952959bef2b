@@ -1,0 +1,1528 @@
+#include "app_karaok_i.h"
+#include "app_karaok.h"
+
+#define AUTOPLAY_TIME_CNT			200
+#define AUTO_SAVE_TIMER_ID			1015
+#define AUTO_SAVE_TIMER_TIMEOUT 	12000
+extern exp_play_mode_t *exp_play_mode;
+
+H_WIN app_karaok_create(root_para_t *para)
+{
+	__gui_manwincreate_para_t create_info;
+    H_WIN hManWin;
+	eLIBs_memset(&create_info, 0, sizeof(__gui_manwincreate_para_t));
+	create_info.name            = APP_KARAOK;
+	create_info.hParent         = para->h_parent;
+	create_info.ManWindowProc   = (__pGUI_WIN_CB)esKRNL_GetCallBack((__pCBK_t)app_karaok_proc); 
+	create_info.attr            = (void*)para;
+	create_info.id				= APP_KARAOK_ID;
+	create_info.hHosting        = NULL;
+    hManWin = GUI_ManWinCreate(&create_info);
+	return hManWin;
+}
+
+static __s32 app_karaok_proc(__gui_msg_t* msg)
+{
+	switch(msg->id)
+	{
+		case GUI_MSG_CREATE:
+		{
+			__s32 ret;
+			karaok_ctrl_t* karaok_ctrl = NULL;
+			root_para_t*   para = NULL;		
+			__u32 color[]={BEETLES_BLACK_COLOR, BEETLES_GRAY_COLOR, 0xC0323232};
+			g_disable_close_scn();		
+			SEND_MSG(DSK_MSG_RELEASE_LOGO_BUF, msg->h_deswin, GUI_WinGetHandFromName("init"), 0, 0, 0);
+			SEND_MSG(DSK_MSG_SCREENON_BUT_BKOFF, msg->h_deswin, GUI_WinGetHandFromName("init"), 0, 0, 0);
+
+			gscene_hbar_set_state(HBAR_ST_HIDE);
+			gscene_bgd_set_state(BGD_STATUS_HIDE);		
+			para = (root_para_t *)GUI_WinGetAttr(msg->h_deswin);
+			karaok_ctrl = esMEMS_Balloc(sizeof(karaok_ctrl_t));
+			if (!karaok_ctrl)
+			{
+				__err("--karaok_ctrl fail--\n");
+				return EPDK_FAIL;
+			}
+			__karaok_robin_sem_init();		
+			esMEM_RequestDramUsrMode(DRAM_USER_MODE_VIDEO);
+			eLIBs_memset(karaok_ctrl, 0, sizeof(karaok_ctrl_t));	
+			GUI_WinSetAddData(msg->h_deswin, (__u32)karaok_ctrl);
+			karaok_ctrl->karaok_manager = msg->h_deswin;
+			karaok_ctrl->root_type 		= para->root_type;
+			if(para->explorer_path == EXPL_BOOT_KALAOK)
+			{
+				karaok_ctrl->karaok_scence_exsit = EPDK_TRUE;
+			}
+			else
+			{
+				karaok_ctrl->karaok_scence_exsit = EPDK_FALSE;
+			}
+			karaok_ctrl_para_init(karaok_ctrl);
+			karaok_reg_para_init(karaok_ctrl); 
+			com_set_palette_by_id(ID_KARAOK_PAL_BMP);
+			com_set_palette_color_by_index(0xF0, color, BEETLES_TBL_SIZE(color));
+
+			GUI_SetTimer(karaok_ctrl->karaok_manager, karaok_ctrl->mic_check_timer_id,80,NULL);	
+			ret = karaok_cur_file_has_breakpoint();            
+			if(1 == KARAOK_ENABLE_BREAKPLAY && EPDK_TRUE == ret)
+			{
+				ret = karaok_breakplay_scene_create(karaok_ctrl);
+				if(EPDK_FAIL == ret)
+				{
+					karaok_exit(karaok_ctrl, 0);
+					return EPDK_OK;
+				}
+			}
+			else
+			{
+				ret = karaok_start_play(karaok_ctrl, ret);
+				if(EPDK_TRUE == karaok_ctrl->karaok_scence_exsit)
+				{
+					karaok_manager_scene_create(karaok_ctrl);
+				}	
+				if (EPDK_OK != ret)
+				{
+                    karaok_playend_scene_create(karaok_ctrl);
+                    esKRNL_TimeDly(100);
+					karaok_exit(karaok_ctrl, 0);	
+					return EPDK_OK;
+				}
+				karaok_after_start_play(karaok_ctrl);
+			}
+			return EPDK_OK;
+		}
+		case GUI_MSG_CLOSE:
+		{
+			if(1 == msg->dwAddData1)
+			{
+				karaok_cmd2parent(msg->h_deswin, SWITCH_TO_MMENU, 0, 0);		
+			}
+			else
+			{			
+				karaok_cmd2parent(msg->h_deswin, SWITCH_TO_EXPLORER, 0, 0);			
+			}
+			return EPDK_OK;
+		}
+		case GUI_MSG_KEY:
+		{
+			karaok_ctrl_t* karaok_ctrl;
+			karaok_ctrl = (karaok_ctrl_t*)GUI_WinGetAddData(msg->h_deswin);
+			if (!karaok_ctrl)
+			{
+				__err("karaok_ctrl is null...\n");
+				return EPDK_OK;
+			}
+			karaok_key(msg);								
+			return GUI_ManWinDefaultProc(msg);
+		}	
+		case GUI_MSG_TOUCH:
+		{
+			break;
+		}
+		case GUI_MSG_TIMER:
+		{
+			karaok_ctrl_t* karaok_ctrl;
+			__s32 ret = EPDK_FAIL;
+			karaok_ctrl = (karaok_ctrl_t*)GUI_WinGetAddData(msg->h_deswin);
+			if(karaok_ctrl)
+			{								
+				if(LOWORD(msg->dwAddData1) == karaok_ctrl->auto_play_timmer_id)
+				{
+                    if(EPDK_OK == karaok_check_play_err(karaok_ctrl))
+                    {
+                    	karaok_ctrl->h_deswin = msg->h_deswin;
+    					karaok_check_auto_play(karaok_ctrl);
+                    }
+					ret = EPDK_OK;
+				}				
+				else if(LOWORD(msg->dwAddData1) == karaok_ctrl->auto_save_bp_timer_id)
+				{
+					karaok_auto_save_breakpoint(karaok_ctrl);
+				}
+				else if(LOWORD(msg->dwAddData1) == karaok_ctrl->mic_check_timer_id)
+				{
+					if(IOCTRL__MIC_DET__IS_PLUGIN())
+					{
+						if(dsk_audio_echo_is_open())
+						{
+							return EPDK_OK;
+						}
+						dsk_audio_echo_close();
+						IOCTRL__MIC__SET_ON();			
+						dsk_audio_echo_open(AUDIO_REC_USR_MIC, 0, 0);
+						
+						dsk_audio_echo_set_delay_num(16);		
+						dsk_audio_echo_set_mic_pre_gain(0);
+						dsk_audio_echo_set_mic_gain(7);
+					}
+					else 
+					{
+						dsk_audio_echo_close();
+					}
+				}
+			}
+			else
+			{
+				__err("karaok_ctrl is null...\n");
+				return EPDK_OK;
+			}	
+			if (EPDK_FAIL == ret)
+			{
+				break;
+			}
+			else
+			{
+				return EPDK_OK;
+			}
+		}
+		case GUI_MSG_DESTROY:
+		{
+			karaok_ctrl_t* karaok_ctrl;			
+			__s32 index ,ret;				
+			karaok_ctrl = (karaok_ctrl_t*)GUI_WinGetAddData(msg->h_deswin);
+			if(NULL == karaok_ctrl)
+			{
+				__wrn("--karaok ctrl is NULL--\n");
+				return EPDK_FAIL;
+			}
+			if (GUI_IsTimerInstalled(msg->h_deswin, karaok_ctrl->auto_save_bp_timer_id))
+			{
+				GUI_KillTimer(msg->h_deswin, karaok_ctrl->auto_save_bp_timer_id);
+			}				
+			if (GUI_IsTimerInstalled(msg->h_deswin, karaok_ctrl->mic_check_timer_id))
+			{
+				GUI_KillTimer(msg->h_deswin, karaok_ctrl->mic_check_timer_id);
+			}	
+			karaok_uninstall_autoplay_timmer(karaok_ctrl);
+            index = robin_npl_get_cur();
+            if(EPDK_FAIL != index)
+            {
+            	karaok_save_breakpoint_info(karaok_ctrl, index);
+            }          
+            karaok_save_last_playfile(msg);
+			robin_set_cmd_stop();		
+			karaok_delete_subscene_by_id(karaok_ctrl, KARAOK_SUB_SCENE_TYPE_ALL);				
+			karaok_manager_scene_delete(karaok_ctrl);
+			karaok_ctrl_para_deinit(karaok_ctrl);
+			eLIBs_memset(karaok_ctrl, 0, sizeof(karaok_ctrl_t));
+			esMEMS_Bfree(karaok_ctrl, sizeof(karaok_ctrl_t));		
+			g_enable_close_scn();	                          
+            robin_close();
+            dsk_audio_echo_close();
+            __karaok_robin_sem_deinit();
+			esMEM_RequestDramUsrMode(DRAM_USER_MODE_NONE);
+			return EPDK_OK;
+		}
+		case GUI_MSG_COMMAND:
+		{
+			karaok_ctrl_t* karaok_ctrl;									
+			karaok_ctrl = (karaok_ctrl_t*)GUI_WinGetAddData(msg->h_deswin);
+			if (karaok_ctrl)
+			{
+				Funprintf("--karaok command id = 0x%x hid = %d--\n",LOWORD(msg->dwAddData1),HIWORD(msg->dwAddData1));
+				switch(LOWORD(msg->dwAddData1))
+				{
+					case KARAOK_MAN_SHOW_ID:
+					{	
+						kararok_man_scene_cmd(karaok_ctrl,HIWORD(msg->dwAddData1), msg->dwAddData2);
+						break;
+					}
+	                case KARAOK_BREAKPLAY_DIALOG_ID:
+					{
+						karaok_breakplay_scene_cmd(karaok_ctrl, HIWORD(msg->dwAddData1), msg->dwAddData2);
+						break;
+					}
+					default:
+						break;
+				}
+			}				
+			return EPDK_OK;
+		}
+		case DSK_MSG_FS_PART_PLUGOUT:
+		{
+			karaok_ctrl_t* karaok_ctrl;
+			karaok_ctrl = (karaok_ctrl_t*)GUI_WinGetAddData(msg->h_deswin);
+			if(!karaok_ctrl)
+			{
+				__msg("karaok_ctrl is null...\n");
+				return EPDK_OK;
+			}
+	 		 karaok_exit(karaok_ctrl, 1);           
+			return EPDK_OK;
+		}	
+        case DSK_MSG_HOME:
+        {
+            karaok_ctrl_t* karaok_ctrl;
+			karaok_ctrl = (karaok_ctrl_t*)GUI_WinGetAddData(msg->h_deswin);
+            if (!karaok_ctrl)
+			{
+				__msg("karaok_ctrl is null...\n");
+				return EPDK_OK;
+			}                  
+            karaok_exit(karaok_ctrl, 1);                        
+            return EPDK_OK;
+        }		
+		default:
+		{
+			__msg("app_karaok_proc: default\n");			
+			break;
+		}
+	}
+
+	return GUI_ManWinDefaultProc(msg);
+}
+static __s32 karaok_manager_scene_create(karaok_ctrl_t *karaok_ctrl)
+{
+	karaok_man_create_para_t create_para;
+	if(NULL == karaok_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	eLIBs_memset(&create_para, 0, sizeof(karaok_man_create_para_t));
+	create_para.hparent  = karaok_ctrl->karaok_manager;
+	create_para.scene_id = KARAOK_MAN_SHOW_ID;
+	karaok_ctrl->man_scene = karaok_man_scene_create(&create_para);
+	if(NULL == karaok_ctrl->man_scene)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	return EPDK_OK;
+}
+static __s32 karaok_manager_scene_delete(karaok_ctrl_t *karaok_ctrl)
+{
+	if(NULL == karaok_ctrl)
+	{
+		__wrn("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	if(karaok_ctrl->man_scene)
+	{
+		karaok_man_scene_delete(karaok_ctrl->man_scene);
+		karaok_ctrl->man_scene = NULL;
+	}
+	return EPDK_OK;
+}
+static __s32 karaok_ctrl_para_init(karaok_ctrl_t* karaok_ctrl)
+{
+	__s32 ret;
+	__s32 screen_width, screen_height;
+	RECT vedio_rect;
+    robin_open_arg_t arg;
+	__u32 data[3]={0};
+	if (!karaok_ctrl)
+	{
+		__err("karaok_ctrl is null...\n");
+		return EPDK_FAIL;
+	}		
+	karaok_ctrl->hdisp = eLIBs_fopen("b:\\DISP\\DISPLAY", "r");
+	if (!karaok_ctrl->hdisp)
+	{
+		__msg("open disp fail...\n");
+	}
+
+	__msg("open disp success...\n");
+	rat_stop_miniature_decode();
+	arg.reserve_mem_size = 1024*1024;
+	arg.cedar_stop_mode = CEDAR_STOP_MODE_KEEP_PLUGINS;
+	arg.switch_vplay_mode = CEDAR_FILE_SWITCH_VPLY_MODE_SEAMLESS;
+	ret = robin_open(ROBIN_MODE_VIDEO_MAX, &arg);
+	if(EPDK_OK != ret)
+	{
+		__msg("robin_open fail...\n");
+		return EPDK_FAIL;
+	}
+	dsk_display_get_size(&screen_width, &screen_height);
+	vedio_rect.x = 0;
+	vedio_rect.y = 0;
+	vedio_rect.width = screen_width;
+	vedio_rect.height = screen_height;
+	karaok_ctrl->hvedio_lyr = robin_request_video_layer(&vedio_rect, 0, 0xff);
+	if (!karaok_ctrl->hvedio_lyr)
+	{
+		__msg("robin_request_vedio_layer fail...\n");
+		return EPDK_FAIL;
+	}
+	
+	data[0] = karaok_ctrl->hvedio_lyr;
+	ret = eLIBs_fioctrl(karaok_ctrl->hdisp, DISP_CMD_LAYER_BOTTOM, 0, (void*)data);
+	if (0 != ret)
+	{
+		__msg("DISP_CMD_LAYER_BOTTOM fail...\n");
+	}
+	else
+	{
+		__msg("DISP_CMD_LAYER_BOTTOM success...\n");
+	}
+	karaok_ctrl->auto_play_timmer_id   = 0x10;
+	karaok_ctrl->auto_save_bp_timer_id = 0x11;	
+	karaok_ctrl->mic_check_timer_id    = 0x12;
+    karaok_ctrl->err_cnt             = 0;
+    karaok_ctrl->rr_flag             = 0;
+    karaok_ctrl->stop_cnt            = 2;
+    karaok_ctrl->cur_time            = 0;
+    karaok_ctrl->stop_cnt            = 0;
+    karaok_ctrl->cur_stop_cnt        = 0;
+    eLIBs_memset(karaok_ctrl->cur_playing_file, 0, sizeof(karaok_ctrl->cur_playing_file));
+	return EPDK_OK;
+}
+
+static __s32 karaok_ctrl_para_deinit(karaok_ctrl_t* karaok_ctrl)
+{
+	if (!karaok_ctrl)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}		
+	if (karaok_ctrl->hvedio_lyr)
+	{   
+		robin_release_video_layer(karaok_ctrl->hvedio_lyr);
+		karaok_ctrl->hvedio_lyr = NULL;
+	}
+
+	if (karaok_ctrl->hdisp)
+	{
+		eLIBs_fclose(karaok_ctrl->hdisp);
+		karaok_ctrl->hdisp = NULL;
+	}	
+
+	return EPDK_OK;
+}
+
+static __s32 karaok_install_autoplay_timmer(karaok_ctrl_t* karaok_ctrl)
+{
+	if (!karaok_ctrl)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}	
+
+	if (!GUI_IsTimerInstalled(karaok_ctrl->karaok_manager, karaok_ctrl->auto_play_timmer_id))
+	{
+		GUI_SetTimer(karaok_ctrl->karaok_manager, karaok_ctrl->auto_play_timmer_id, AUTOPLAY_TIME_CNT, NULL);		
+	}
+	else
+	{
+		__msg("timmer already install...\n");
+		return EPDK_FAIL;
+	}
+	
+	return EPDK_OK;
+}
+static __s32 karaok_uninstall_autoplay_timmer(karaok_ctrl_t* karaok_ctrl)
+{
+	if (!karaok_ctrl)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}	
+	
+	if (GUI_IsTimerInstalled(karaok_ctrl->karaok_manager, karaok_ctrl->auto_play_timmer_id))
+	{
+		GUI_KillTimer(karaok_ctrl->karaok_manager, karaok_ctrl->auto_play_timmer_id);
+	}			
+	
+	return EPDK_OK;
+}
+
+static __s32 karaok_load_breakpoint_info(__s32 index, __cedar_tag_inf_t* tag_inf)
+{
+	__s32 ret;
+	char filename[RAT_MAX_FULL_PATH_LEN]={0};  
+	
+	ret = robin_npl_index2file(index, filename);
+	if (-1 == ret)
+	{
+		__msg("robin_npl_index2file fail...\n");
+		return -1;
+	}
+
+    __here__;
+	if (!fifo_db_has_exist(NAME_KARAOK_BKPOINT))
+		return -1;
+	__here__;
+	if (get_item_content_from_fifo_db(NAME_KARAOK_BKPOINT, filename, tag_inf))
+		return -1;	
+
+    __here__;
+	return 0;
+}
+
+static __s32 karaok_make_tag(karaok_ctrl_t* karaok_ctrl, __cedar_tag_inf_t* tag_inf)
+{
+    char cur_playing_file[RAT_MAX_FULL_PATH_LEN+1]={0};   
+    if(!karaok_ctrl)
+    {
+        __err("invalid para...\n");
+        return EPDK_FAIL;
+    }  
+    if(!tag_inf)
+    {
+        __err("invalid para...\n");
+        return EPDK_FAIL;
+    }
+    cur_playing_file[0] = 0;
+    robin_get_fsm_cur_file(cur_playing_file, sizeof(cur_playing_file));
+    if(0 == eLIBs_strcmp(cur_playing_file, karaok_ctrl->cur_playing_file))
+    {
+        eLIBs_memset(tag_inf, 0, sizeof(__cedar_tag_inf_t));
+        eLIBs_strncpy(tag_inf->tag_magic, "VTAG", 4);
+        tag_inf->time_offset = karaok_ctrl->cur_time;
+    }
+    else
+    {        
+        __here__;
+        karaok_ctrl->cur_time = 0;
+        return EPDK_FAIL;
+    }   
+    return EPDK_OK;
+}
+
+static __s32 karaok_save_breakpoint_info(karaok_ctrl_t* karaok_ctrl, __s32 index)
+{
+	__cedar_tag_inf_t tag_inf;
+	char filename[RAT_MAX_FULL_PATH_LEN]={0};
+	__s32 ret;
+    __cedar_status_t  fsm_sta;
+
+    if(!karaok_ctrl)
+    {
+        __err("invalid para...\n");
+        return EPDK_FAIL;
+    }
+    fsm_sta = robin_get_fsm_status();
+	ret = robin_npl_index2file(index, filename);
+	if (-1 == ret)
+	{
+		__msg("robin_npl_index2file fail...\n");
+		return -1;
+	}
+
+    __msg("begin save breakpoint, index = %d, filename=%s\n", index, filename);
+    
+	if (!fifo_db_has_exist(NAME_KARAOK_BKPOINT))
+	{
+		ret = create_fifo_db(NAME_KARAOK_BKPOINT, 2, sizeof(__cedar_tag_inf_t));
+		if (0 != ret)
+		{
+			__msg("create_fifo_db fail...\n");
+			return -1;
+		}
+	}
+	ret = add_item_to_fifo_db(NAME_KARAOK_BKPOINT, filename, &tag_inf);
+	__msg("add_item_to_fifo_db, ret=%d\n", ret);  
+	return ret;	
+}
+
+static __s32 karaok_delete_breakpoint_info(karaok_ctrl_t* karaok_ctrl, __s32 index)
+{
+	__s32 ret;
+	char filename[RAT_MAX_FULL_PATH_LEN]={0};
+    __cedar_tag_inf_t tag_inf;
+
+    if(!karaok_ctrl)
+    {
+        __err("invalid para...\n");
+        return EPDK_FAIL;
+    }
+	
+	ret = robin_npl_index2file(index, filename);
+	if (-1 == ret)
+	{
+		__msg("robin_npl_index2file fail...\n");
+		return -1;
+	}
+	
+	if (!fifo_db_has_exist(NAME_KARAOK_BKPOINT))
+		return -1;
+
+    ret = get_item_content_from_fifo_db(NAME_KARAOK_BKPOINT, filename, &tag_inf);
+    if(-1 == ret)
+    {
+        return 0;
+    }
+	
+	if (delete_item_from_fifo_db(NAME_KARAOK_BKPOINT, filename))
+		return -1;	
+	
+	return 0;
+}
+static __s32 kraarok_change_track(karaok_ctrl_t* karaok_ctrl)
+{
+	Funprintf("--karaok track flag = %d mode = %d--\n\n",karaok_ctrl->start_flag,karaok_ctrl->track_mode);
+	if(karaok_ctrl->start_flag)				/*first start set  */
+	{
+		robin_select_track(TRACK_ORIGINAL);
+		karaok_ctrl->start_flag = 0;
+	}
+	else 
+	{
+ 		robin_select_track(karaok_ctrl->track_mode);
+	}		
+	return EPDK_OK;
+}
+static __s32 karaok_play_file(karaok_ctrl_t* karaok_ctrl, __s32 index, __bool breakplay)
+{
+	__s32 ret;		
+	char filename[RAT_MAX_FULL_PATH_LEN]={0};
+	__cedar_tag_inf_t tag_inf;	
+	ret = robin_npl_index2file(index, filename);
+	if (-1 == ret)
+	{
+		__msg("robin_npl_index2file fail...\n");
+		return EPDK_FAIL;
+	}
+	if (GUI_IsTimerInstalled(karaok_ctrl->karaok_manager, karaok_ctrl->auto_save_bp_timer_id))
+	{
+		GUI_ResetTimer(karaok_ctrl->karaok_manager, karaok_ctrl->auto_save_bp_timer_id, AUTO_SAVE_TIMER_TIMEOUT, NULL);
+	}
+    if(EPDK_TRUE == breakplay)
+    {
+        ret = karaok_load_breakpoint_info(index, &tag_inf);
+    	if (0 == ret)
+    	{
+            robin_set_cmd_stop();
+    		ret = robin_play_file(filename, &tag_inf);
+            if(EPDK_FAIL == ret)
+            {
+                return EPDK_FAIL;
+            }
+            robin_set_cmd_play();
+			dsk_amplifier_onoff(BEETLES_SPEAK_ON);    	
+		}
+    	else
+    	{
+            robin_set_cmd_stop();
+    		ret = robin_play_file(filename, NULL);
+            if(EPDK_FAIL == ret)
+            {
+                return EPDK_FAIL;
+            }
+            robin_set_cmd_play();
+			dsk_amplifier_onoff(BEETLES_SPEAK_ON);
+    		__msg("wrn, no breakpoint info, not breakplay... index = %d filename=%s\n", index, filename);
+    	}	
+    }
+    else
+    {        
+        robin_set_cmd_stop();
+        ret = robin_play_file(filename, NULL);
+        if(EPDK_FAIL == ret)
+        {
+            return EPDK_FAIL;
+        }
+        robin_set_cmd_play();
+		dsk_amplifier_onoff(BEETLES_SPEAK_ON);
+    }	
+	kraarok_change_track(karaok_ctrl);
+	return ret;
+}
+
+static __s32 karaok_cur_file_has_breakpoint(void)
+{
+    __s32 ret;
+	__s32 index;	  
+	__cedar_tag_inf_t tag_inf;
+	
+	index = robin_npl_get_cur();
+	if (-1 == index)
+	{
+		__msg("robin_npl_get_cur fail...\n");
+		return EPDK_FALSE;
+	}   
+
+    __msg("before karaok_load_breakpoint_info\n");
+	ret = karaok_load_breakpoint_info(index, &tag_inf);
+	if (0 == ret)
+	{        
+		return EPDK_TRUE;
+	}
+	else
+	{
+		return EPDK_FALSE;
+	}	    
+}
+
+static __s32 karaok_play_next(karaok_ctrl_t* karaok_ctrl)
+{
+	__s32 ret;	
+	__s32 index;
+	__s32 total;  
+	index = robin_npl_get_cur();
+	if (-1 == index)
+	{
+		__msg("robin_npl_get_cur fail...\n");
+		return EPDK_FAIL;
+	}
+    karaok_delete_breakpoint_info(karaok_ctrl, index);
+    total = robin_npl_get_total_count();
+    if(-1 == total)
+    {
+        __msg("robin_npl_get_total_count fail...\n");
+		return EPDK_FAIL;
+    }  
+    index++;
+    if(index >= total)
+    {
+        index = 0;
+    }   
+    robin_npl_set_cur(index);	
+	ret = karaok_play_file(karaok_ctrl, index, EPDK_FALSE);   
+	kraarok_change_track(karaok_ctrl);
+	return ret;
+}
+
+static __s32 karaok_play_prev(karaok_ctrl_t* karaok_ctrl)
+{
+	__s32 ret;	
+	__s32 index;
+	__s32 total;
+    
+	index = robin_npl_get_cur();
+	if (-1 == index)
+	{
+		__msg("robin_npl_get_cur fail...\n");
+		return EPDK_FAIL;
+	}
+    total = robin_npl_get_total_count();
+    if(-1 == total)
+    {
+        __msg("robin_npl_get_total_count fail...\n");
+		return EPDK_FAIL;
+    }
+    
+    index--;
+    if(index < 0)
+    {
+        index = total-1;
+    }   
+
+    if(index < 0)
+    {
+        __msg("total karaok count = 0\n");
+        index = 0;
+    }
+    robin_npl_set_cur(index);
+	ret = karaok_play_file(karaok_ctrl, index, EPDK_FALSE);
+	kraarok_change_track(karaok_ctrl);
+	return ret;
+}
+
+static __s32 karaok_start_play(karaok_ctrl_t* karaok_ctrl, __bool breakplay)
+{
+	__s32 ret;
+	__s32 index;	   
+	index = robin_npl_get_cur();
+	if (EPDK_FAIL == index)
+	{
+		__msg("robin_npl_get_cur fail...\n");
+		return EPDK_FAIL;
+	}
+	karaok_ctrl->start_flag = 1;
+	ret = karaok_play_file(karaok_ctrl, index, breakplay);	
+	return ret;
+}
+
+static __s32 karaok_auto_play_next(karaok_ctrl_t* karaok_ctrl)
+{
+	__s32 ret;	
+	__s32 index;
+	__s32 total;
+    index = robin_npl_get_cur();
+    if(-1 != index)
+    {
+        __here__;
+        karaok_delete_breakpoint_info(karaok_ctrl, index);
+        __here__;
+    }   
+	index = robin_npl_get_next();
+	if (-1 == index)
+	{
+		__msg("robin_npl_get_cur fail...\n");
+		return EPDK_FAIL;
+	}	
+	
+	karaok_play_file(karaok_ctrl, index, EPDK_FALSE);       
+	return EPDK_OK;
+}
+static __s32 karaok_exit(karaok_ctrl_t* karaok_ctrl, __s32 flag)
+{
+	__msg("before karaok_exit\n");
+
+	if (!karaok_ctrl)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	if (karaok_ctrl->exit_karaok)
+	{
+		__msg("karaok already exit...\n");
+		return EPDK_FAIL;
+	}
+	karaok_ctrl->exit_karaok = 1;
+	if (!karaok_ctrl->karaok_manager)
+	{
+		__err("karaok_ctrl->karaok_manager is null...\n");
+		return EPDK_FAIL;
+	}
+    karaok_uninstall_autoplay_timmer(karaok_ctrl);  
+	{
+		__gui_msg_t msg;
+
+		eLIBs_memset(&msg, 0, sizeof(__gui_msg_t));
+		msg.id = GUI_MSG_CLOSE;
+        msg.dwAddData1 = flag;
+		msg.h_deswin = karaok_ctrl->karaok_manager;
+		GUI_SendMessage(&msg);
+	}		
+	__msg("after karaok_exit\n");
+	return EPDK_OK;
+}
+static __s32 karaok_check_play_err(karaok_ctrl_t* karaok_ctrl)
+{
+	__s32 ret;
+
+	ret = robin_get_feedback_msg();
+	if (ret < 0)
+	{
+        robin_clear_feedback_msgQ();//��մ�����Ϣ��Ϣ����
+        __msg("robin_get_feedback_msg < 0, karaok play err...\n");
+        karaok_delete_subscene_by_id(karaok_ctrl, KARAOK_SUB_SCENE_TYPE_ALL&(~KARAOK_SUB_SHOW_ID));
+        karaok_playerror_scene_create(karaok_ctrl);
+        esKRNL_TimeDly(100);
+        karaok_playerror_scene_delete(karaok_ctrl);
+
+        karaok_ctrl->err_cnt++;
+        
+        if(karaok_ctrl->err_cnt >= robin_npl_get_total_count()
+            || RAT_PLAY_MODE_ROTATE_ONE == robin_get_play_mode())
+        {
+		    karaok_exit(karaok_ctrl, 0);
+        }
+
+        return EPDK_FAIL;
+	}
+
+	return EPDK_OK;
+}
+
+static __s32 karaok_check_auto_play(karaok_ctrl_t* karaok_ctrl)
+{
+	if(!karaok_ctrl)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	{
+		__cedar_status_t fsm_sta;
+		fsm_sta = robin_get_fsm_status();
+		if(CEDAR_STAT_PLAY == fsm_sta|| CEDAR_STAT_PAUSE == fsm_sta)
+		{
+			karaok_ctrl->cur_time = robin_get_cur_time();
+			robin_get_fsm_cur_file(karaok_ctrl->cur_playing_file, sizeof(karaok_ctrl->cur_playing_file));
+		}
+		else
+		{
+			karaok_ctrl->cur_time = -1;
+			eLIBs_strcpy(karaok_ctrl->cur_playing_file, "");
+		}
+		switch(fsm_sta)
+		{
+			case CEDAR_STAT_STOP:
+			{
+				__s32 ret;
+				karaok_ctrl->cur_stop_cnt++;
+
+				if(karaok_ctrl->cur_stop_cnt < karaok_ctrl->stop_cnt)
+				{
+					break;
+				}
+
+				karaok_ctrl->cur_stop_cnt = 0;
+				__msg("CEDAR_STAT_STOP, start play next...\n");
+				__msg("karaok_ctrl->rr_flag=%d\n", karaok_ctrl->rr_flag);
+				if(exp_play_mode->play_state == EXPLOROER_SW_TO_MOVIE)
+				{
+					karaok_cmd2parent(karaok_ctrl->h_deswin, SWITCH_TO_EXPLORER, 0, 0);
+					return EPDK_OK;
+				}
+				if(1 == karaok_ctrl->rr_flag)
+				{
+					__s32 index;
+					index = robin_npl_get_cur();
+					__msg("index=%d\n", index);
+					if(-1 != index)
+					{
+						karaok_play_file(karaok_ctrl, index, EPDK_FALSE);
+					}
+					//karaok_ctrl->rr_flag = 0;
+				}
+				else
+				{
+					ret = karaok_auto_play_next(karaok_ctrl);
+					if(EPDK_OK != ret) //�������,�˳�Ӧ��
+					{
+						karaok_playend_scene_create(karaok_ctrl);
+						esKRNL_TimeDly(100);
+						karaok_exit(karaok_ctrl, 0);
+					}
+					else
+					{
+					}
+				}
+
+				break;
+			}
+
+			case CEDAR_STAT_PLAY:
+			{
+				karaok_ctrl->rr_flag = 0;
+				__msg("karaok_ctrl->rr_flag=%d\n", karaok_ctrl->rr_flag);
+				{
+					karaok_ctrl->err_cnt = 0;
+				}
+				break;
+			}
+
+			case CEDAR_STAT_RR:
+			{
+				karaok_ctrl->rr_flag = 1;
+				__msg("karaok_ctrl->rr_flag=%d\n", karaok_ctrl->rr_flag);
+				break;
+			}
+
+			default:
+			{
+				karaok_ctrl->rr_flag = 0;
+				__msg("fsm_sta=%d, karaok_ctrl->rr_flag=%d\n", fsm_sta, karaok_ctrl->rr_flag);
+				break;
+			}
+		}
+	}
+	return EPDK_OK;
+}
+
+static __s32 karaok_subshow_scene_create(karaok_ctrl_t* karaok_ctrl)
+{	
+ 	karaok_sub_show_create_para_t create_para;
+	if (NULL == karaok_ctrl)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}
+ 	eLIBs_memset(&create_para, 0, sizeof(karaok_sub_show_create_para_t));
+ 	create_para.hparent  = karaok_ctrl->karaok_manager;
+ 	create_para.scene_id = KARAOK_SUB_SHOW_ID;
+    create_para.sub_pos  = karaok_ctrl->sub_pos;
+    create_para.sub_color= karaok_ctrl->sub_color;
+    create_para.sub_size = karaok_ctrl->sub_size;
+ 	karaok_ctrl->sub_show_scene = karaok_sub_show_scene_create(&create_para);
+ 	if (NULL == karaok_ctrl->sub_show_scene)
+ 	{
+ 		__msg("karaok_subshow_scene_create fail...\n");
+ 		return EPDK_FAIL;
+ 	}
+	return EPDK_OK;
+}
+
+static __s32 karaok_subshow_scene_delete(karaok_ctrl_t* karaok_ctrl)
+{
+	__s32 ret;	
+	
+	if (NULL == karaok_ctrl)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}
+ 	if (karaok_ctrl->sub_show_scene)
+ 	{
+ 		karaok_sub_show_scene_delete(karaok_ctrl->sub_show_scene);
+ 		karaok_ctrl->sub_show_scene = NULL;
+ 	}
+	return EPDK_OK;
+}
+static __s32 karaok_breakplay_scene_create(karaok_ctrl_t* karaok_ctrl)
+{
+	if (NULL == karaok_ctrl)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	} 
+    if (NULL == karaok_ctrl->breakplay_scene)
+    {
+        __s32 lang_id[]={STRING_KARAOK_TIPS, STRING_KARAOK_BREAKPLAY};
+        default_dialog(karaok_ctrl->breakplay_scene, karaok_ctrl->karaok_manager, KARAOK_BREAKPLAY_DIALOG_ID, ADLG_YESNO, lang_id);
+    }  
+	if (NULL == karaok_ctrl->breakplay_scene)
+	{
+		__msg("default_dialog fail...\n");
+		return EPDK_FAIL;
+	}
+	return EPDK_OK;
+}
+
+static __s32 karaok_breakplay_scene_delete(karaok_ctrl_t* karaok_ctrl)
+{	
+	if (NULL == karaok_ctrl)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}	
+	if (karaok_ctrl->breakplay_scene)
+	{
+		app_dialog_destroy(karaok_ctrl->breakplay_scene);
+		karaok_ctrl->breakplay_scene = NULL;
+	}	
+	return EPDK_OK;
+}
+
+static __s32 karaok_playerror_scene_create(karaok_ctrl_t* karaok_ctrl)
+{
+	if(NULL == karaok_ctrl)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}	
+    if (NULL == karaok_ctrl->playerror_scene)
+    {
+        __s32 lang_id[]={STRING_KARAOK_TIPS, STRING_KARAOK_FILE_NOT_SUPPORT};
+
+        default_dialog(karaok_ctrl->playerror_scene, karaok_ctrl->karaok_manager, KARAOK_PLAYERROR_DIALOG_ID, ADLG_OK, lang_id);
+    }    
+	if (NULL == karaok_ctrl->playerror_scene)
+	{
+		__msg("default_dialog fail...\n");
+		return EPDK_FAIL;
+	}
+	
+	return EPDK_OK;
+}
+
+static __s32 karaok_playerror_scene_delete(karaok_ctrl_t* karaok_ctrl)
+{	
+	if (NULL == karaok_ctrl)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	if (karaok_ctrl->playerror_scene)
+	{
+		app_dialog_destroy(karaok_ctrl->playerror_scene);
+		karaok_ctrl->playerror_scene = NULL;
+	}
+	return EPDK_OK;
+}
+
+static __s32 karaok_playend_scene_create(karaok_ctrl_t* karaok_ctrl)
+{	
+	if (NULL == karaok_ctrl)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}	
+    if (NULL == karaok_ctrl->playend_scene)
+    {
+        __s32 lang_id[]={STRING_KARAOK_TIPS, STRING_KARAOK_PLAY_END};
+        default_dialog(karaok_ctrl->playend_scene, karaok_ctrl->karaok_manager, KARAOK_PLAYEND_DIALOG_ID, ADLG_OK, lang_id);
+    }         
+	if (NULL == karaok_ctrl->playend_scene)
+	{
+		__msg("default_dialog fail...\n");
+		return EPDK_FAIL;
+	}	
+	return EPDK_OK;
+}
+
+static __s32 karaok_playend_scene_delete(karaok_ctrl_t* karaok_ctrl)
+{	
+	if (NULL == karaok_ctrl)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	if (karaok_ctrl->playend_scene)
+	{
+		app_dialog_destroy(karaok_ctrl->playend_scene);
+		karaok_ctrl->playend_scene = NULL;
+	}
+	return EPDK_OK;
+}
+
+static __s32 karaok_has_subscene(karaok_ctrl_t* karaok_ctrl, __u32 sub_id)
+{
+    H_WIN child;
+    char  winname[256];
+    __u32 child_id;
+    if (NULL == karaok_ctrl)
+    {
+        __err("invalid para...\n");
+        return EPDK_FALSE;
+    }
+    if (!karaok_ctrl->karaok_manager)
+    {
+        __err("invalid para...\n");
+        return EPDK_FALSE;
+    }          
+    child = GUI_WinGetFirstChild(karaok_ctrl->karaok_manager);  
+    while( child != NULL )
+	{				
+		child_id = GUI_WinGetItemId(child);
+		if ((child_id & sub_id))
+		{
+			return EPDK_TRUE;				
+		}
+		
+		child = GUI_WinGetNextBro(child);
+    }
+
+    return EPDK_FALSE;
+}
+
+static __s32 karaok_delete_subscene_by_id(karaok_ctrl_t* karaok_ctrl, __u32 sub_id)
+{
+	H_WIN child, next_child;
+ 	char  winname[256];
+	__u32 child_id;
+	if (NULL == karaok_ctrl)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}
+	if (!karaok_ctrl->karaok_manager)
+	{
+		__err("invalid para...\n");
+		return EPDK_FAIL;
+	}			
+	child = GUI_WinGetFirstChild(karaok_ctrl->karaok_manager);	
+	while( child != NULL )
+	{
+		eLIBs_memset(winname, 0, 256);
+		GUI_WinGetName(child, winname);	
+        next_child = GUI_WinGetNextBro(child);
+		child_id = GUI_WinGetItemId(child);
+		if ((child_id & sub_id))
+		{        
+			switch(child_id)
+			{
+				case KARAOK_SUB_SHOW_ID:
+				{
+					karaok_subshow_scene_delete(karaok_ctrl);
+					break;
+				}
+                case KARAOK_BREAKPLAY_DIALOG_ID:
+				{
+					karaok_breakplay_scene_delete(karaok_ctrl);
+					break;
+				}
+                case KARAOK_PLAYERROR_DIALOG_ID:
+                {
+                    karaok_playerror_scene_delete(karaok_ctrl);
+					break;
+                }
+                case KARAOK_PLAYEND_DIALOG_ID:
+                {
+                    karaok_playend_scene_delete(karaok_ctrl);
+					break;
+                }
+				default:
+				{
+					__err("unknown child id, child_id=%d\n", child_id);
+					return EPDK_FAIL;
+				}
+			}			
+		}	
+		child = next_child;
+ 	} 	
+	return EPDK_OK;
+}
+static __s32 karaok_after_start_play(karaok_ctrl_t* karaok_ctrl)
+{              
+    if(1 == karaok_ctrl->sub_state)
+    {                    
+        karaok_subshow_scene_create(karaok_ctrl);
+    }
+    karaok_install_autoplay_timmer(karaok_ctrl);     
+    return EPDK_OK;
+}
+
+static __s32 karaok_breakplay_scene_cmd(karaok_ctrl_t* karaok_ctrl, __s32 id, __s32 dw2)
+{
+	switch(id)
+	{
+		case ADLG_CMD_EXIT:
+		{
+            if(ADLG_IDYES == dw2)
+            {               
+                karaok_delete_subscene_by_id(karaok_ctrl, KARAOK_SUB_SCENE_TYPE_ALL);             
+                karaok_start_play(karaok_ctrl, EPDK_TRUE);                
+                karaok_after_start_play(karaok_ctrl);        
+    			return EPDK_OK;
+            }
+            else
+            {
+                
+                karaok_delete_subscene_by_id(karaok_ctrl, KARAOK_SUB_SCENE_TYPE_ALL);  
+    			karaok_start_play(karaok_ctrl, EPDK_FALSE);    
+                karaok_after_start_play(karaok_ctrl); 
+    			return EPDK_OK;
+            }                 
+		}		
+		default:
+		{
+			break;
+		}
+	}	
+	return EPDK_FAIL;
+}
+static __s32 kararok_man_scene_cmd(karaok_ctrl_t* karaok_ctrl, __s32 id,__s32 dw2)
+{
+	switch(id)
+	{
+		case karaok_prog_scene_msg_pre:
+		{
+			KARAOK_ROBIN_PEND;
+			karaok_play_prev(karaok_ctrl);				
+			KARAOK_ROBIN_POST;
+			break;
+		}
+		case karaok_prog_scene_msg_playpause:
+		{		
+			if(dw2)
+			{		
+				robin_set_cmd_play();
+			}
+			else
+			{	
+				robin_set_cmd_pause();
+			}
+			break;
+		}
+		case karaok_prog_scene_msg_next:
+		{			
+			KARAOK_ROBIN_PEND;
+			karaok_play_next(karaok_ctrl);			
+			KARAOK_ROBIN_POST;
+			break;
+		}
+		case karaok_prog_scene_msg_track:
+		{
+			karaok_ctrl->track_mode = dw2;
+			kraarok_change_track(karaok_ctrl);			
+			break;
+		}
+		default:
+			break;
+	}
+	return EPDK_OK;
+}
+static __s32 karaok_save_last_playfile(__gui_msg_t* msg)
+{
+    __s32 index;
+    char file[RAT_MAX_FULL_PATH_LEN]={0};
+    root_para_t *root_para;
+    root_para = (root_para_t *)GUI_WinGetAttr(msg->h_deswin);
+    index = robin_npl_get_cur();    
+    if(-1 != index)
+    {
+        __s32 ret;
+        ret = robin_npl_index2file(index, file);
+        if(EPDK_OK == ret)
+        {
+            ret = dsk_reg_save_cur_play_info(REG_APP_MOVIE, index,file,root_para->root_type);
+            if(EPDK_OK == ret)
+            {
+                return EPDK_OK;
+            }
+            else
+            {
+                __msg("dsk_reg_save_cur_play_info fail...\n");
+                return EPDK_FAIL;
+            }
+        }
+        else
+        {
+            __msg("robin_npl_index2file fail...\n");
+            return EPDK_FAIL;
+        }
+    }       
+
+    return EPDK_FAIL;
+}
+
+static __s32 karaok_save_last_playfile_auto(karaok_ctrl_t *karaok_ctrl)
+{
+    __s32 index;
+    char file[RAT_MAX_FULL_PATH_LEN]={0};
+
+    index = robin_npl_get_cur();    
+    if(-1 != index)
+    {
+        __s32 ret;
+
+        ret = robin_npl_index2file(index, file);
+        if(EPDK_OK == ret)
+        {
+            ret = dsk_reg_save_cur_play_info(REG_APP_MOVIE, index, 
+                file, karaok_ctrl->root_type);
+            if(EPDK_OK == ret)
+            {
+                __msg("dsk_reg_save_cur_play_info success,index=%d, file=%s, root=%d\n",
+                    index, file, karaok_ctrl->root_type);
+                return EPDK_OK;
+            }
+            else
+            {
+                __msg("dsk_reg_save_cur_play_info fail...\n");
+                return EPDK_FAIL;
+            }
+        }
+        else
+        {
+            __msg("robin_npl_index2file fail...\n");
+            return EPDK_FAIL;
+        }
+    }       
+
+    return EPDK_FAIL;
+}
+
+static void karaok_set_play_mode(void)
+{    
+    reg_movie_para_t* para;
+
+    if(dsk_reg_get_app_restore_flag(REG_APP_MOVIE))
+    {
+        __msg("load default setting...\n");
+        para = (reg_movie_para_t*)dsk_reg_get_default_para_by_app(REG_APP_MOVIE);
+    }
+    else
+    {
+        __msg("load current setting...\n");
+        para = (reg_movie_para_t*)dsk_reg_get_para_by_app(REG_APP_MOVIE);
+    }
+    if(para)
+    {
+        robin_set_play_mode(para->rotate_mode);
+        __msg("para->rotate_mode=%d\n", para->rotate_mode);
+    }
+    else
+    {
+        robin_set_play_mode(RAT_PLAY_MODE_ROTATE_ALL);
+    }
+}
+
+static void karaok_set_zoom_mode(void)
+{
+    reg_movie_para_t* para;
+
+    if(dsk_reg_get_app_restore_flag(REG_APP_MOVIE))
+    {
+        __msg("load default setting...\n");
+        para = (reg_movie_para_t*)dsk_reg_get_default_para_by_app(REG_APP_MOVIE);
+    }
+    else
+    {
+        __msg("load current setting...\n");
+        para = (reg_movie_para_t*)dsk_reg_get_para_by_app(REG_APP_MOVIE);
+    }
+    
+    if(para)
+    {
+        robin_set_zoom(para->zoom_mode);        
+        __msg("para->zoom_mode=%d\n", para->zoom_mode);
+    }
+}
+
+static __u32 karaok_get_sub_state(void)
+{
+	return 0;
+}
+
+static __u32 karaok_get_sub_stream_index(void)
+{
+    reg_movie_para_t* para;
+
+    if(dsk_reg_get_app_restore_flag(REG_APP_MOVIE))
+    {
+        __msg("load default setting...\n");
+        para = (reg_movie_para_t*)dsk_reg_get_default_para_by_app(REG_APP_MOVIE);
+    }
+    else
+    {
+        __msg("load current setting...\n");
+        para = (reg_movie_para_t*)dsk_reg_get_para_by_app(REG_APP_MOVIE);
+    }
+    
+    if(para)
+    {
+        __msg("para->sub_stream=%d\n", para->sub_stream);
+        return para->sub_stream;        
+    }
+    else
+    {
+        return 1;
+    }
+}
+
+static __u32 karaok_get_sub_show_pos(void)
+{
+    reg_movie_para_t* para;
+
+    if(dsk_reg_get_app_restore_flag(REG_APP_MOVIE))
+    {
+        __msg("load default setting...\n");
+        para = (reg_movie_para_t*)dsk_reg_get_default_para_by_app(REG_APP_MOVIE);
+    }
+    else
+    {
+        __msg("load current setting...\n");
+        para = (reg_movie_para_t*)dsk_reg_get_para_by_app(REG_APP_MOVIE);
+    }
+    
+    if(para)
+    {
+        __msg("para->sub_pos=%d\n", para->sub_pos);
+        return para->sub_pos;        
+    }
+    else
+    {
+        return 0;
+    }
+}
+
+static __u32 karaok_get_sub_show_color(void)
+{
+    reg_movie_para_t* para;
+
+    if(dsk_reg_get_app_restore_flag(REG_APP_MOVIE))
+    {
+        __msg("load default setting...\n");
+        para = (reg_movie_para_t*)dsk_reg_get_default_para_by_app(REG_APP_MOVIE);
+    }
+    else
+    {
+        __msg("load current setting...\n");
+        para = (reg_movie_para_t*)dsk_reg_get_para_by_app(REG_APP_MOVIE);
+    }
+    
+    if(para)
+    {
+        __msg("para->sub_color=%x\n", para->sub_color);
+        return para->sub_color;        
+    }
+    else
+    {
+        return GUI_WHITE;
+    }
+}
+
+static __s32 karaok_reg_para_init(karaok_ctrl_t* karaok_ctrl)
+{
+    karaok_set_play_mode();
+    karaok_set_zoom_mode();
+    karaok_ctrl->sub_pos   = karaok_get_sub_show_pos();
+    karaok_ctrl->sub_color = karaok_get_sub_show_color();
+    karaok_ctrl->sub_state = karaok_get_sub_state();
+    karaok_ctrl->sub_stream =karaok_get_sub_stream_index();
+    karaok_ctrl->sub_size  = 16;
+    dsk_reg_set_app_restore_flag(REG_APP_MOVIE, 0);
+
+    return EPDK_OK;
+}
+static __s32 karaok_play_by_index(karaok_ctrl_t* karaok_ctrl, __u32 karaok_index) 
+{
+	__s32 ret;	
+	__s32 index;
+	__s32 total;
+	
+	index = robin_npl_get_cur();
+	if (-1 == index)
+	{
+		__msg("robin_npl_get_cur fail...\n");
+		return EPDK_FAIL;
+	}
+    karaok_delete_breakpoint_info(karaok_ctrl, index);
+    total = robin_npl_get_total_count();
+    if(-1 == total)
+    {
+        __msg("robin_npl_get_total_count fail...\n");
+		return EPDK_FAIL;
+    } 
+    index = karaok_index;
+    if(index > total)
+    {
+        return EPDK_FAIL;
+    }   
+	else if(0 == index)
+	{
+		return EPDK_FAIL; 
+	}
+	else
+	{
+		index --;
+	}
+    robin_npl_set_cur(index);	
+	ret = karaok_play_file(karaok_ctrl, index, EPDK_FALSE);   
+	return ret;
+}
+static void karaok_auto_save_breakpoint(karaok_ctrl_t* karaok_ctrl)
+{
+    __s32 index;      	
+    index = robin_npl_get_cur();
+    if(-1 != index)
+    {
+        __here__;
+        karaok_save_breakpoint_info(karaok_ctrl, index);
+    }
+	else
+	{
+		return;
+	}
+
+    if(EPDK_OK == karaok_save_last_playfile_auto(karaok_ctrl))
+    {
+        __msg("karaok_save_last_playfile success...\n");
+    }
+    else
+    {
+        __msg("karaok_save_last_playfile fail...\n");
+		return;
+    }
+	dsk_reg_flush(REG_APP_MOVIE);	
+}
+
+static __s32 karaok_key(__gui_msg_t *msg)
+{
+	karaok_ctrl_t *karaok_ctrl;
+	karaok_ctrl = (karaok_ctrl_t *)GUI_WinGetAddData(msg->h_deswin);
+	Funprintf("--karaok dw1 = %d dw2 = %d--\n", msg->dwAddData1, msg->dwAddData2); 
+	if(!karaok_ctrl)
+	{
+		__err("--karaok_ctrl null--\n");
+		return EPDK_OK;
+	}
+	if(KEY_UP_ACTION == msg->dwAddData2)
+	{
+		switch(msg->dwAddData1)
+		{
+			default:
+				break;
+		}
+		return EPDK_OK;
+	}
+	else
+	{
+		switch(msg->dwAddData1)
+		{
+			case GUI_MSG_KEY_ESCAPE:
+			{			
+				karaok_exit(karaok_ctrl, 0);				
+				return EPDK_OK;	
+			}
+			default:
+				break;
+		}
+	}
+}
