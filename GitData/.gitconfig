@@ -1,0 +1,44 @@
+	
+[user]
+	name = zhaomm
+	email = 291732699@qq.com
+[filter "lfs"]
+	smudge = git-lfs smudge -- %f
+	required = true
+	clean = git-lfs clean -- %f
+[core]
+	editor = vim
+	autocrlf = false
+	quotepath = false
+	safecrlf = true
+
+[gui]
+	recentrepo = E:/work/Story/C500_NetStoryTP_V1.0
+[merge "ours"]
+	driver = true	
+[merge]  
+    tool = meld
+[mergetool]  
+    prompt = false  
+[mergetool "meld"]  
+    path = d:/Program Files/Meld/Meld.exe
+[diff]  
+    tool = bc4  
+[difftool]  
+    prompt = false  
+[difftool "bc4"]  
+    cmd = "\"D:\\Program Files\\Beyond Compare 4/BComp.exe\" \"$LOCAL\" \"$REMOTE\""	
+[http]
+	postBuffer = 524288000	
+	
+
+ 
+
+
+
+  
+   
+[init]
+	templatedir = D:/gittest/C500.NET_TEST/githooks/githooks_bootstrap
+[hooks]
+	symlinksourcerepo = D:/gittest/C500.NET_TEST/githooks
