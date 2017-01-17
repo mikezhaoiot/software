@@ -1,3 +1,0 @@
-**SoftWare Configuration specification**
-
-
