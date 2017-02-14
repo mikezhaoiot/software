@@ -1,0 +1,7 @@
+rocker_main.c merge=ours
+drv_rocker.c merge=ours
+sys_event.h merge=ours
+msg_emit.c merge=ours
+message.h merge=ours
+gpio_ctrl.h merge=ours
+upgrade.ini  merge=ours

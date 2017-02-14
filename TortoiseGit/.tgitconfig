@@ -1,0 +1,9 @@
+[bugtraq]
+	url = http://192.168.2.208:10101/tickets/~zhaomm%2Fgitblit_test.git/%BUGID%
+	logregex = "[Ii]ssues?:?(\\s*(,|and)?\\s*#?\\d+)+\n(\\d+)"
+	warnifnoissue = false
+
+[tgit]
+	warnnosignedoffby = true
+	projectlanguage = 1033
+	icon = src/Resources/Tortoise.ico
